@@ -8,9 +8,31 @@
 """
 
 import os
+from pathlib import Path
 from typing import Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings
+
+# 自动查找并加载.env文件
+# 优先级：当前目录 > 项目根目录
+def _find_env_file() -> str:
+    """查找.env文件路径。"""
+    # 当前工作目录
+    cwd_env = Path.cwd() / ".env"
+    if cwd_env.exists():
+        return str(cwd_env)
+    
+    # 项目根目录（config目录的父目录）
+    project_root = Path(__file__).parent.parent
+    root_env = project_root / ".env"
+    if root_env.exists():
+        return str(root_env)
+    
+    # 默认返回当前目录（即使不存在也不会报错）
+    return ".env"
+
+
+ENV_FILE_PATH = _find_env_file()
 
 
 class ModelConfig:
@@ -175,10 +197,12 @@ class Settings(BaseSettings):
         description="API调用的最大重试次数"
     )
     
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        extra = "ignore"
+    model_config = {
+        "env_file": ENV_FILE_PATH,
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",
+        "env_ignore_empty": True,
+    }
     
     def get_generator_config(self) -> ModelConfig:
         """获取生成器节点的配置。"""
