@@ -1,31 +1,31 @@
 """
-Test Case Generator - Main Entry Point
+测试用例生成器 - 主程序入口
 
-A LangGraph-based workflow for generating, reviewing, and optimizing test cases.
+基于LangGraph的工作流，用于生成、评审和优化测试用例。
 
-Usage:
-    # Basic usage with text input
-    python main.py --input "Your requirements here"
+使用方式:
+    # 基本用法 - 文本输入
+    python main.py --input "你的需求描述"
     
-    # With file input
+    # 文件输入
     python main.py --file requirements.docx
     
-    # With multiple files
+    # 多文件输入
     python main.py --files doc1.pdf doc2.docx
     
-    # With custom output format
+    # 自定义输出格式
     python main.py --input "..." --format confluence
     
-    # Programmatic usage
+    # 编程方式使用
     from main import generate_test_cases
-    result = generate_test_cases("Your requirements", api_key="sk-...")
+    result = generate_test_cases("你的需求", api_key="sk-...")
 """
 
 import argparse
 import os
 import sys
 
-# Add workspace to path
+# 添加工作区到路径
 sys.path.insert(0, '/workspace')
 
 from config.settings import settings, ModelConfig
@@ -40,7 +40,7 @@ def load_prompts_config(config_file: str = None) -> None:
     """
     加载提示词配置文件。
     
-    Args:
+    参数:
         config_file: 配置文件路径，支持JSON/YAML格式
     """
     if config_file is None:
@@ -68,45 +68,45 @@ def generate_test_cases(
     verbose: bool = False
 ) -> WorkflowResult:
     """
-    Generate test cases from input content.
+    从输入内容生成测试用例。
     
-    This is the main programmatic interface for the test case generator.
+    这是测试用例生成器的主要编程接口。
     
-    Args:
-        input_content: The input content (text, file path, or list of paths)
-        api_key: API key for LLM (uses env var if not provided)
-        base_url: Base URL for LLM API (uses env var if not provided)
-        generator_model: Model for test case generation
-        reviewer_model: Model for test case review
-        optimizer_model: Model for test case optimization
-        output_format: Output format (markdown/confluence)
-        additional_instructions: Additional instructions for generation
-        enable_rag: Whether to enable RAG
-        rag_documents: Documents to add to RAG knowledge base
-        verbose: Whether to print progress information
+    参数:
+        input_content: 输入内容（文本、文件路径或路径列表）
+        api_key: LLM的API密钥（未提供时使用环境变量）
+        base_url: LLM API的基础URL（未提供时使用环境变量）
+        generator_model: 用于测试用例生成的模型
+        reviewer_model: 用于测试用例评审的模型
+        optimizer_model: 用于测试用例优化的模型
+        output_format: 输出格式 (markdown/confluence)
+        additional_instructions: 生成的额外指示
+        enable_rag: 是否启用RAG
+        rag_documents: 要添加到RAG知识库的文档
+        verbose: 是否打印进度信息
         
-    Returns:
-        WorkflowResult containing the final test cases
+    返回:
+        包含最终测试用例的WorkflowResult
         
-    Example:
+    示例:
         result = generate_test_cases(
-            "Login feature requirements...",
+            "登录功能需求...",
             api_key="sk-...",
             output_format="markdown"
         )
         print(result.final_test_cases)
     """
-    # Use provided API key or fall back to settings
+    # 使用提供的API密钥或回退到设置
     api_key = api_key or settings.generator_api_key or os.getenv("OPENAI_API_KEY")
     base_url = base_url or settings.generator_base_url
     
     if not api_key:
         raise ValueError(
-            "API key is required. Provide via api_key parameter, "
-            "GENERATOR_API_KEY environment variable, or OPENAI_API_KEY."
+            "需要API密钥。通过api_key参数、"
+            "GENERATOR_API_KEY环境变量或OPENAI_API_KEY提供。"
         )
     
-    # Create RAG interface if enabled
+    # 如果启用则创建RAG接口
     rag_interface = None
     if enable_rag:
         rag_config = RAGConfig(
@@ -116,7 +116,7 @@ def generate_test_cases(
         )
         rag_interface = RAGInterface(rag_config)
         
-        # Add documents to RAG if provided
+        # 如果提供则添加文档到RAG
         if rag_documents:
             for doc in rag_documents:
                 if os.path.exists(doc):
@@ -124,7 +124,7 @@ def generate_test_cases(
                 else:
                     rag_interface.add_documents([doc])
     
-    # Create workflow
+    # 创建工作流
     workflow = create_workflow(
         api_key=api_key,
         base_url=base_url,
@@ -135,7 +135,7 @@ def generate_test_cases(
         enable_rag=enable_rag
     )
     
-    # Attach RAG interface if created
+    # 如果创建了则附加RAG接口
     if rag_interface:
         workflow.rag_interface = rag_interface
         workflow.generator.rag_interface = rag_interface
@@ -143,15 +143,15 @@ def generate_test_cases(
         workflow.optimizer.rag_interface = rag_interface
     
     if verbose:
-        print("Starting test case generation workflow...")
-        print(f"  Generator model: {generator_model or settings.generator_model_name}")
-        print(f"  Reviewer model: {reviewer_model or settings.reviewer_model_name}")
-        print(f"  Optimizer model: {optimizer_model or settings.optimizer_model_name}")
-        print(f"  Output format: {output_format}")
-        print(f"  RAG enabled: {enable_rag}")
+        print("正在启动测试用例生成工作流...")
+        print(f"  生成器模型: {generator_model or settings.generator_model_name}")
+        print(f"  评审员模型: {reviewer_model or settings.reviewer_model_name}")
+        print(f"  优化器模型: {optimizer_model or settings.optimizer_model_name}")
+        print(f"  输出格式: {output_format}")
+        print(f"  RAG启用: {enable_rag}")
         print()
     
-    # Run workflow with progress tracking if verbose
+    # 如果verbose则运行带进度跟踪的工作流
     if verbose:
         for step, result in workflow.run_step_by_step(
             input_content,
@@ -161,11 +161,11 @@ def generate_test_cases(
             if result is None:
                 print(f"  [{step}]...")
             elif step.endswith("error"):
-                print(f"  [{step}] Error: {result}")
+                print(f"  [{step}] 错误: {result}")
             else:
-                print(f"  [{step}] Done")
+                print(f"  [{step}] 完成")
         
-        # Get final result
+        # 获取最终结果
         result = workflow.run(
             input_content,
             additional_instructions=additional_instructions,
@@ -183,36 +183,36 @@ def generate_test_cases(
 
 def run_interactive():
     """
-    Run the test case generator in interactive mode.
+    以交互模式运行测试用例生成器。
     """
     print("=" * 60)
-    print("Test Case Generator - Interactive Mode")
+    print("测试用例生成器 - 交互模式")
     print("=" * 60)
     print()
     
-    # Check for API key
+    # 检查API密钥
     api_key = settings.generator_api_key or os.getenv("OPENAI_API_KEY")
     if not api_key:
-        api_key = input("Enter your API key: ").strip()
+        api_key = input("请输入您的API密钥: ").strip()
         if not api_key:
-            print("Error: API key is required")
+            print("错误: 需要API密钥")
             return
     
-    # Get base URL
+    # 获取基础URL
     base_url = settings.generator_base_url
-    custom_url = input(f"Base URL [{base_url}]: ").strip()
+    custom_url = input(f"基础URL [{base_url}]: ").strip()
     if custom_url:
         base_url = custom_url
     
-    # Get output format
-    output_format = input("Output format (markdown/confluence) [markdown]: ").strip()
+    # 获取输出格式
+    output_format = input("输出格式 (markdown/confluence) [markdown]: ").strip()
     if output_format not in ["markdown", "confluence", ""]:
         output_format = "markdown"
     elif output_format == "":
         output_format = "markdown"
     
     print()
-    print("Enter your requirements (press Ctrl+D or Ctrl+Z when done):")
+    print("请输入您的需求（完成后按Ctrl+D或Ctrl+Z）:")
     print("-" * 40)
     
     lines = []
@@ -226,12 +226,12 @@ def run_interactive():
     input_content = "\n".join(lines)
     
     if not input_content.strip():
-        print("Error: No input provided")
+        print("错误: 未提供输入")
         return
     
     print()
     print("-" * 40)
-    print("Processing...")
+    print("正在处理...")
     print()
     
     try:
@@ -245,175 +245,175 @@ def run_interactive():
         
         print()
         print("=" * 60)
-        print("FINAL TEST CASES")
+        print("最终测试用例")
         print("=" * 60)
         print()
         print(result.final_test_cases)
         
         if result.errors:
             print()
-            print("Warnings/Errors:")
+            print("警告/错误:")
             for error in result.errors:
                 print(f"  - {error}")
         
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"错误: {e}")
 
 
 def main():
-    """Main entry point for CLI."""
+    """CLI主入口点。"""
     parser = argparse.ArgumentParser(
-        description="Generate test cases from requirements using LLM workflow",
+        description="使用LLM工作流从需求生成测试用例",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  # Generate from text input
-  python main.py --input "User login feature: users can login with email and password"
+示例:
+  # 从文本输入生成
+  python main.py --input "用户登录功能: 用户可以使用邮箱和密码登录"
   
-  # Generate from file
+  # 从文件生成
   python main.py --file requirements.docx
   
-  # Generate from multiple files
+  # 从多个文件生成
   python main.py --files doc1.pdf doc2.docx screenshot.png
   
-  # Use custom models
+  # 使用自定义模型
   python main.py --input "..." --generator-model gpt-4o --reviewer-model o1-preview
   
-  # Output in Confluence format
+  # 输出Confluence格式
   python main.py --input "..." --format confluence
   
-  # Interactive mode
+  # 交互模式
   python main.py --interactive
 """
     )
     
-    # Input options (mutually exclusive)
+    # 输入选项（互斥）
     input_group = parser.add_mutually_exclusive_group()
     input_group.add_argument(
         "--input", "-i",
         type=str,
-        help="Direct text input (requirements)"
+        help="直接文本输入（需求）"
     )
     input_group.add_argument(
         "--file", "-f",
         type=str,
-        help="Path to input file"
+        help="输入文件路径"
     )
     input_group.add_argument(
         "--files",
         nargs="+",
-        help="Paths to multiple input files"
+        help="多个输入文件的路径"
     )
     input_group.add_argument(
         "--interactive",
         action="store_true",
-        help="Run in interactive mode"
+        help="以交互模式运行"
     )
     
-    # API configuration
+    # API配置
     parser.add_argument(
         "--api-key",
         type=str,
-        help="API key (or set OPENAI_API_KEY env var)"
+        help="API密钥（或设置OPENAI_API_KEY环境变量）"
     )
     parser.add_argument(
         "--base-url",
         type=str,
-        help="API base URL"
+        help="API基础URL"
     )
     
-    # Model configuration
+    # 模型配置
     parser.add_argument(
         "--generator-model",
         type=str,
-        help="Model for test case generation"
+        help="用于测试用例生成的模型"
     )
     parser.add_argument(
         "--reviewer-model",
         type=str,
-        help="Model for test case review"
+        help="用于测试用例评审的模型"
     )
     parser.add_argument(
         "--optimizer-model",
         type=str,
-        help="Model for test case optimization"
+        help="用于测试用例优化的模型"
     )
     
-    # Output options
+    # 输出选项
     parser.add_argument(
         "--format",
         choices=["markdown", "confluence"],
         default="markdown",
-        help="Output format (default: markdown)"
+        help="输出格式（默认: markdown）"
     )
     parser.add_argument(
         "--output", "-o",
         type=str,
-        help="Output file path (prints to stdout if not specified)"
+        help="输出文件路径（未指定时输出到标准输出）"
     )
     
-    # Additional options
+    # 额外选项
     parser.add_argument(
         "--instructions",
         type=str,
         default="",
-        help="Additional instructions for test case generation"
+        help="测试用例生成的额外指示"
     )
     parser.add_argument(
         "--verbose", "-v",
         action="store_true",
-        help="Print progress information"
+        help="打印进度信息"
     )
     
-    # RAG options
+    # RAG选项
     parser.add_argument(
         "--enable-rag",
         action="store_true",
-        help="Enable RAG (Retrieval-Augmented Generation)"
+        help="启用RAG（检索增强生成）"
     )
     parser.add_argument(
         "--rag-documents",
         nargs="+",
-        help="Documents to add to RAG knowledge base"
+        help="要添加到RAG知识库的文档"
     )
     
-    # Prompt configuration
+    # 提示词配置
     parser.add_argument(
         "--prompts-config",
         type=str,
-        help="Path to prompts configuration file (JSON/YAML)"
+        help="提示词配置文件路径（JSON/YAML）"
     )
     
     args = parser.parse_args()
     
-    # Load prompts configuration if specified
+    # 如果指定则加载提示词配置
     load_prompts_config(args.prompts_config)
     
-    # Handle interactive mode
+    # 处理交互模式
     if args.interactive:
         run_interactive()
         return
     
-    # Determine input content
+    # 确定输入内容
     if args.input:
         input_content = args.input
     elif args.file:
         if not os.path.exists(args.file):
-            print(f"Error: File not found: {args.file}")
+            print(f"错误: 文件未找到: {args.file}")
             sys.exit(1)
         input_content = args.file
     elif args.files:
         for f in args.files:
             if not os.path.exists(f):
-                print(f"Error: File not found: {f}")
+                print(f"错误: 文件未找到: {f}")
                 sys.exit(1)
         input_content = args.files
     else:
         parser.print_help()
-        print("\nError: Please provide input via --input, --file, --files, or --interactive")
+        print("\n错误: 请通过 --input、--file、--files 或 --interactive 提供输入")
         sys.exit(1)
     
-    # Run generation
+    # 运行生成
     try:
         result = generate_test_cases(
             input_content,
@@ -429,35 +429,35 @@ Examples:
             verbose=args.verbose
         )
         
-        # Output results
+        # 输出结果
         if args.output:
             with open(args.output, 'w', encoding='utf-8') as f:
                 f.write(result.final_test_cases)
             if args.verbose:
-                print(f"\nOutput written to: {args.output}")
+                print(f"\n输出已写入: {args.output}")
         else:
             if args.verbose:
                 print()
                 print("=" * 60)
-                print("FINAL TEST CASES")
+                print("最终测试用例")
                 print("=" * 60)
                 print()
             print(result.final_test_cases)
         
-        # Print errors/warnings
+        # 打印错误/警告
         if result.errors and args.verbose:
-            print("\nWarnings/Errors:")
+            print("\n警告/错误:")
             for error in result.errors:
                 print(f"  - {error}")
         
-        # Exit with appropriate code
+        # 使用适当的退出码退出
         sys.exit(0 if result.success else 1)
         
     except ValueError as e:
-        print(f"Configuration Error: {e}")
+        print(f"配置错误: {e}")
         sys.exit(1)
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"错误: {e}")
         if args.verbose:
             import traceback
             traceback.print_exc()

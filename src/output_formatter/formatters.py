@@ -1,9 +1,9 @@
 """
-Output formatters for test cases.
+测试用例输出格式化器模块。
 
-Supports multiple output formats:
-- Markdown: Standard markdown nested list format
-- Confluence: Confluence wiki task list format
+支持多种输出格式：
+- Markdown: 标准markdown嵌套列表格式
+- Confluence: Confluence wiki任务列表格式
 """
 
 import re
@@ -12,17 +12,16 @@ from typing import Optional
 
 
 class OutputFormat(Enum):
-    """Supported output formats."""
+    """支持的输出格式。"""
     MARKDOWN = "markdown"
     CONFLUENCE = "confluence"
 
 
 class OutputFormatter:
     """
-    Formatter for test case output.
+    测试用例输出的格式化器。
     
-    Converts test cases to different formats suitable for
-    various documentation systems.
+    将测试用例转换为适合各种文档系统的不同格式。
     """
     
     def format(
@@ -31,14 +30,14 @@ class OutputFormatter:
         output_format: OutputFormat = OutputFormat.MARKDOWN
     ) -> str:
         """
-        Format the content according to the specified format.
+        根据指定格式格式化内容。
         
-        Args:
-            content: The test cases content to format
-            output_format: Target output format
+        参数:
+            content: 要格式化的测试用例内容
+            output_format: 目标输出格式
             
-        Returns:
-            Formatted content
+        返回:
+            格式化后的内容
         """
         if output_format == OutputFormat.CONFLUENCE:
             return self.to_confluence(content)
@@ -47,35 +46,35 @@ class OutputFormatter:
     
     def to_markdown(self, content: str) -> str:
         """
-        Ensure content is in proper markdown format.
+        确保内容是正确的markdown格式。
         
-        Args:
-            content: The content to format
+        参数:
+            content: 要格式化的内容
             
-        Returns:
-            Markdown formatted content
+        返回:
+            markdown格式化的内容
         """
-        # If already in markdown format, return as-is
+        # 如果已经是markdown格式，直接返回
         if self._is_markdown_list(content):
             return content
         
-        # Try to convert from other formats
+        # 尝试从其他格式转换
         return self._normalize_markdown(content)
     
     def to_confluence(self, content: str) -> str:
         """
-        Convert content to Confluence task list format.
+        将内容转换为Confluence任务列表格式。
         
-        Confluence task list format:
-        * [ ] Top level task
-        ** [ ] Sub task
-        *** [ ] Sub-sub task
+        Confluence任务列表格式：
+        * [ ] 顶层任务
+        ** [ ] 子任务
+        *** [ ] 子子任务
         
-        Args:
-            content: The content to convert
+        参数:
+            content: 要转换的内容
             
-        Returns:
-            Confluence formatted content
+        返回:
+            Confluence格式化的内容
         """
         lines = content.split('\n')
         result_lines = []
@@ -86,29 +85,29 @@ class OutputFormatter:
                 result_lines.append('')
                 continue
             
-            # Calculate indentation level
+            # 计算缩进级别
             leading_spaces = len(line) - len(line.lstrip())
             
-            # Detect list markers
+            # 检测列表标记
             content_part = line.lstrip()
             
-            # Check for markdown list markers
+            # 检查markdown列表标记
             markdown_match = re.match(r'^[-*+]\s*(\[.\])?\s*(.*)$', content_part)
             if markdown_match:
                 checkbox = markdown_match.group(1) or '[ ]'
                 text = markdown_match.group(2)
                 
-                # Convert to confluence level
+                # 转换为confluence级别
                 level = self._calculate_level(leading_spaces)
                 stars = '*' * (level + 1)
                 
-                # Use checkbox format
+                # 使用复选框格式
                 if checkbox in ['[x]', '[X]']:
                     result_lines.append(f"{stars} [x] {text}")
                 else:
                     result_lines.append(f"{stars} [ ] {text}")
             
-            # Check for numbered list
+            # 检查数字列表
             elif re.match(r'^\d+\.\s+(.*)$', content_part):
                 match = re.match(r'^\d+\.\s+(.*)$', content_part)
                 text = match.group(1)
@@ -116,15 +115,15 @@ class OutputFormatter:
                 stars = '*' * (level + 1)
                 result_lines.append(f"{stars} [ ] {text}")
             
-            # Non-list content (headers, etc.)
+            # 非列表内容（标题等）
             else:
-                # Check if it's a header
+                # 检查是否是标题
                 if content_part.startswith('#'):
                     header_match = re.match(r'^(#+)\s*(.*)$', content_part)
                     if header_match:
                         level = len(header_match.group(1))
                         text = header_match.group(2)
-                        # Convert to Confluence heading
+                        # 转换为Confluence标题
                         result_lines.append(f"h{level}. {text}")
                     else:
                         result_lines.append(stripped)
@@ -135,26 +134,26 @@ class OutputFormatter:
     
     def _calculate_level(self, spaces: int, indent_size: int = 2) -> int:
         """
-        Calculate nesting level from indentation.
+        根据缩进计算嵌套级别。
         
-        Args:
-            spaces: Number of leading spaces
-            indent_size: Number of spaces per indent level
+        参数:
+            spaces: 前导空格数
+            indent_size: 每个缩进级别的空格数
             
-        Returns:
-            Nesting level (0-based)
+        返回:
+            嵌套级别（从0开始）
         """
         return spaces // indent_size
     
     def _is_markdown_list(self, content: str) -> bool:
         """
-        Check if content is already in markdown list format.
+        检查内容是否已经是markdown列表格式。
         
-        Args:
-            content: Content to check
+        参数:
+            content: 要检查的内容
             
-        Returns:
-            True if content contains markdown list markers
+        返回:
+            如果内容包含markdown列表标记则返回True
         """
         lines = content.split('\n')
         list_lines = 0
@@ -163,19 +162,19 @@ class OutputFormatter:
             if stripped and re.match(r'^[-*+]\s+', stripped):
                 list_lines += 1
         
-        # Consider it markdown if at least 30% of non-empty lines are list items
+        # 如果至少30%的非空行是列表项，则认为是markdown
         non_empty = sum(1 for line in lines if line.strip())
         return non_empty > 0 and (list_lines / non_empty) > 0.3
     
     def _normalize_markdown(self, content: str) -> str:
         """
-        Normalize content to proper markdown format.
+        将内容规范化为正确的markdown格式。
         
-        Args:
-            content: Content to normalize
+        参数:
+            content: 要规范化的内容
             
-        Returns:
-            Normalized markdown content
+        返回:
+            规范化的markdown内容
         """
         lines = content.split('\n')
         result_lines = []
@@ -186,60 +185,60 @@ class OutputFormatter:
                 result_lines.append('')
                 continue
             
-            # Keep markdown headers
+            # 保留markdown标题
             if stripped.lstrip().startswith('#'):
                 result_lines.append(stripped)
                 continue
             
-            # Keep existing list format
+            # 保留现有列表格式
             if re.match(r'^[\s]*[-*+]\s+', stripped):
                 result_lines.append(stripped)
                 continue
             
-            # Keep numbered lists
+            # 保留数字列表
             if re.match(r'^[\s]*\d+\.\s+', stripped):
                 result_lines.append(stripped)
                 continue
             
-            # Keep other content as-is
+            # 其他内容保持原样
             result_lines.append(stripped)
         
         return '\n'.join(result_lines)
     
     def extract_test_cases(self, content: str) -> list[dict]:
         """
-        Extract structured test case data from formatted content.
+        从格式化内容中提取结构化的测试用例数据。
         
-        Args:
-            content: Formatted test case content
+        参数:
+            content: 格式化的测试用例内容
             
-        Returns:
-            List of test case dictionaries with title, level, and children
+        返回:
+            包含title、level和children的测试用例字典列表
         """
         lines = content.split('\n')
         test_cases = []
-        current_stack = []  # Stack to track hierarchy
+        current_stack = []  # 用于跟踪层级的栈
         
         for line in lines:
             stripped = line.rstrip()
             if not stripped:
                 continue
             
-            # Calculate level from indentation
+            # 根据缩进计算级别
             leading_spaces = len(line) - len(line.lstrip())
             level = self._calculate_level(leading_spaces)
             
-            # Extract text content
+            # 提取文本内容
             content_part = line.lstrip()
             
-            # Remove list markers
+            # 移除列表标记
             text_match = re.match(r'^[-*+]\s*(\[.\])?\s*(.*)$', content_part)
             if text_match:
                 text = text_match.group(2)
             elif re.match(r'^\d+\.\s+(.*)$', content_part):
                 text = re.match(r'^\d+\.\s+(.*)$', content_part).group(1)
             else:
-                # Skip non-list items or treat as top-level
+                # 跳过非列表项或作为顶层处理
                 if content_part.startswith('#'):
                     continue
                 text = content_part
@@ -251,7 +250,7 @@ class OutputFormatter:
                 'children': []
             }
             
-            # Build hierarchy
+            # 构建层级结构
             while current_stack and current_stack[-1]['level'] >= level:
                 current_stack.pop()
             
@@ -266,13 +265,13 @@ class OutputFormatter:
     
     def to_json_structure(self, content: str) -> list[dict]:
         """
-        Convert test cases to a JSON-serializable structure.
+        将测试用例转换为JSON可序列化的结构。
         
-        Args:
-            content: Test case content
+        参数:
+            content: 测试用例内容
             
-        Returns:
-            List of test case dictionaries
+        返回:
+            测试用例字典列表
         """
         return self.extract_test_cases(content)
     
@@ -283,15 +282,15 @@ class OutputFormatter:
         indent_size: int = 2
     ) -> str:
         """
-        Convert JSON structure back to formatted text.
+        将JSON结构转换回格式化文本。
         
-        Args:
-            test_cases: List of test case dictionaries
-            output_format: Target output format
-            indent_size: Number of spaces per indent level
+        参数:
+            test_cases: 测试用例字典列表
+            output_format: 目标输出格式
+            indent_size: 每个缩进级别的空格数
             
-        Returns:
-            Formatted test case text
+        返回:
+            格式化的测试用例文本
         """
         lines = []
         

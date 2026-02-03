@@ -1,11 +1,10 @@
 """
-RAG (Retrieval-Augmented Generation) interface for the test case generator.
+测试用例生成器的RAG（检索增强生成）接口。
 
-This module provides a pluggable interface for RAG functionality.
-The actual implementation can use various vector stores (Chroma, Pinecone, etc.)
-and embedding models.
+本模块提供可插拔的RAG功能接口。
+实际实现可以使用各种向量存储（Chroma、Pinecone等）和嵌入模型。
 
-Currently provides a skeleton/interface for future implementation.
+目前提供用于未来实现的骨架/接口。
 """
 
 from abc import ABC, abstractmethod
@@ -16,18 +15,18 @@ from typing import Any, Optional
 @dataclass
 class RAGConfig:
     """
-    Configuration for RAG functionality.
+    RAG功能的配置。
     
-    Attributes:
-        enabled: Whether RAG is enabled
-        collection_name: Name of the vector store collection
-        embedding_model: Model to use for embeddings
-        embedding_api_key: API key for embedding model
-        embedding_base_url: Base URL for embedding API
-        vector_store_type: Type of vector store (chroma, pinecone, faiss, etc.)
-        vector_store_config: Additional vector store configuration
-        top_k: Number of documents to retrieve
-        similarity_threshold: Minimum similarity score for retrieval
+    属性:
+        enabled: 是否启用RAG
+        collection_name: 向量存储集合名称
+        embedding_model: 用于嵌入的模型
+        embedding_api_key: 嵌入模型的API密钥
+        embedding_base_url: 嵌入API的基础URL
+        vector_store_type: 向量存储类型（chroma、pinecone、faiss等）
+        vector_store_config: 额外的向量存储配置
+        top_k: 要检索的文档数量
+        similarity_threshold: 检索的最小相似度分数
     """
     enabled: bool = False
     collection_name: str = "test_case_knowledge"
@@ -43,13 +42,13 @@ class RAGConfig:
 @dataclass
 class RetrievedDocument:
     """
-    A document retrieved from the vector store.
+    从向量存储检索的文档。
     
-    Attributes:
-        content: The document content
-        metadata: Document metadata
-        score: Similarity score
-        source: Source identifier
+    属性:
+        content: 文档内容
+        metadata: 文档元数据
+        score: 相似度分数
+        source: 来源标识
     """
     content: str
     metadata: dict = field(default_factory=dict)
@@ -57,16 +56,16 @@ class RetrievedDocument:
     source: str = ""
     
     def __str__(self) -> str:
-        """String representation of the document."""
-        source_info = f" (Source: {self.source})" if self.source else ""
+        """文档的字符串表示。"""
+        source_info = f" (来源: {self.source})" if self.source else ""
         return f"{self.content}{source_info}"
 
 
 class BaseVectorStore(ABC):
     """
-    Abstract base class for vector store implementations.
+    向量存储实现的抽象基类。
     
-    Implement this class to add support for different vector stores.
+    实现此类以添加对不同向量存储的支持。
     """
     
     @abstractmethod
@@ -77,15 +76,15 @@ class BaseVectorStore(ABC):
         ids: Optional[list[str]] = None
     ) -> list[str]:
         """
-        Add documents to the vector store.
+        向向量存储添加文档。
         
-        Args:
-            documents: List of document contents
-            metadatas: Optional list of metadata dicts
-            ids: Optional list of document IDs
+        参数:
+            documents: 文档内容列表
+            metadatas: 可选的元数据字典列表
+            ids: 可选的文档ID列表
             
-        Returns:
-            List of document IDs
+        返回:
+            文档ID列表
         """
         pass
     
@@ -97,48 +96,47 @@ class BaseVectorStore(ABC):
         filter_dict: Optional[dict] = None
     ) -> list[RetrievedDocument]:
         """
-        Search for similar documents.
+        搜索相似文档。
         
-        Args:
-            query: Search query
-            top_k: Number of results to return
-            filter_dict: Optional metadata filter
+        参数:
+            query: 搜索查询
+            top_k: 返回的结果数量
+            filter_dict: 可选的元数据过滤器
             
-        Returns:
-            List of retrieved documents
+        返回:
+            检索到的文档列表
         """
         pass
     
     @abstractmethod
     def delete(self, ids: list[str]) -> bool:
         """
-        Delete documents by ID.
+        按ID删除文档。
         
-        Args:
-            ids: List of document IDs to delete
+        参数:
+            ids: 要删除的文档ID列表
             
-        Returns:
-            True if successful
+        返回:
+            成功则返回True
         """
         pass
     
     @abstractmethod
     def clear(self) -> bool:
         """
-        Clear all documents from the store.
+        清除存储中的所有文档。
         
-        Returns:
-            True if successful
+        返回:
+            成功则返回True
         """
         pass
 
 
 class ChromaVectorStore(BaseVectorStore):
     """
-    Chroma vector store implementation.
+    Chroma向量存储实现。
     
-    Note: This is a placeholder implementation. Install chromadb
-    and implement the actual functionality when needed.
+    注意：这是一个占位实现。需要时安装chromadb并实现实际功能。
     """
     
     def __init__(self, config: RAGConfig):
@@ -148,35 +146,35 @@ class ChromaVectorStore(BaseVectorStore):
         self._embeddings = None
     
     def _initialize(self):
-        """Initialize the Chroma client and collection."""
+        """初始化Chroma客户端和集合。"""
         try:
             import chromadb
             from langchain_openai import OpenAIEmbeddings
             
-            # Initialize embeddings
+            # 初始化嵌入
             self._embeddings = OpenAIEmbeddings(
                 api_key=self.config.embedding_api_key,
                 base_url=self.config.embedding_base_url,
                 model=self.config.embedding_model
             )
             
-            # Initialize Chroma client
+            # 初始化Chroma客户端
             persist_dir = self.config.vector_store_config.get('persist_directory')
             if persist_dir:
                 self._client = chromadb.PersistentClient(path=persist_dir)
             else:
                 self._client = chromadb.Client()
             
-            # Get or create collection
+            # 获取或创建集合
             self._collection = self._client.get_or_create_collection(
                 name=self.config.collection_name,
-                metadata={"description": "Test case knowledge base"}
+                metadata={"description": "测试用例知识库"}
             )
             
         except ImportError:
             raise ImportError(
-                "chromadb is required for Chroma vector store. "
-                "Install it with: pip install chromadb"
+                "Chroma向量存储需要chromadb。"
+                "使用以下命令安装: pip install chromadb"
             )
     
     def add_documents(
@@ -188,15 +186,15 @@ class ChromaVectorStore(BaseVectorStore):
         if self._collection is None:
             self._initialize()
         
-        # Generate IDs if not provided
+        # 如果未提供则生成ID
         if ids is None:
             import uuid
             ids = [str(uuid.uuid4()) for _ in documents]
         
-        # Generate embeddings
+        # 生成嵌入
         embeddings = self._embeddings.embed_documents(documents)
         
-        # Add to collection
+        # 添加到集合
         self._collection.add(
             documents=documents,
             embeddings=embeddings,
@@ -215,17 +213,17 @@ class ChromaVectorStore(BaseVectorStore):
         if self._collection is None:
             self._initialize()
         
-        # Generate query embedding
+        # 生成查询嵌入
         query_embedding = self._embeddings.embed_query(query)
         
-        # Search
+        # 搜索
         results = self._collection.query(
             query_embeddings=[query_embedding],
             n_results=top_k,
             where=filter_dict
         )
         
-        # Convert to RetrievedDocument objects
+        # 转换为RetrievedDocument对象
         documents = []
         for i, doc in enumerate(results['documents'][0]):
             metadata = results['metadatas'][0][i] if results['metadatas'] else {}
@@ -260,9 +258,9 @@ class ChromaVectorStore(BaseVectorStore):
 
 class InMemoryVectorStore(BaseVectorStore):
     """
-    Simple in-memory vector store for testing/development.
+    简单的内存向量存储，用于测试/开发。
     
-    Uses basic cosine similarity without external dependencies.
+    使用基本的余弦相似度，无需外部依赖。
     """
     
     def __init__(self, config: RAGConfig):
@@ -271,7 +269,7 @@ class InMemoryVectorStore(BaseVectorStore):
         self._embeddings = None
     
     def _initialize(self):
-        """Initialize embeddings model."""
+        """初始化嵌入模型。"""
         try:
             from langchain_openai import OpenAIEmbeddings
             
@@ -281,11 +279,11 @@ class InMemoryVectorStore(BaseVectorStore):
                 model=self.config.embedding_model
             )
         except ImportError:
-            # Fall back to no embeddings (text matching only)
+            # 回退到无嵌入（仅文本匹配）
             self._embeddings = None
     
     def _cosine_similarity(self, vec1: list[float], vec2: list[float]) -> float:
-        """Calculate cosine similarity between two vectors."""
+        """计算两个向量之间的余弦相似度。"""
         import math
         
         dot_product = sum(a * b for a, b in zip(vec1, vec2))
@@ -306,17 +304,17 @@ class InMemoryVectorStore(BaseVectorStore):
         if self._embeddings is None:
             self._initialize()
         
-        # Generate IDs if not provided
+        # 如果未提供则生成ID
         if ids is None:
             import uuid
             ids = [str(uuid.uuid4()) for _ in documents]
         
-        # Generate embeddings if available
+        # 如果可用则生成嵌入
         embeddings = None
         if self._embeddings:
             embeddings = self._embeddings.embed_documents(documents)
         
-        # Store documents
+        # 存储文档
         for i, doc in enumerate(documents):
             self._documents[ids[i]] = {
                 'content': doc,
@@ -341,11 +339,11 @@ class InMemoryVectorStore(BaseVectorStore):
         results = []
         
         if self._embeddings:
-            # Vector similarity search
+            # 向量相似度搜索
             query_embedding = self._embeddings.embed_query(query)
             
             for doc_id, doc_data in self._documents.items():
-                # Apply metadata filter
+                # 应用元数据过滤
                 if filter_dict:
                     match = all(
                         doc_data['metadata'].get(k) == v
@@ -369,7 +367,7 @@ class InMemoryVectorStore(BaseVectorStore):
                     source=doc_data['metadata'].get('source', doc_id)
                 ))
         else:
-            # Simple text matching fallback
+            # 简单文本匹配回退
             query_lower = query.lower()
             for doc_id, doc_data in self._documents.items():
                 if filter_dict:
@@ -380,7 +378,7 @@ class InMemoryVectorStore(BaseVectorStore):
                     if not match:
                         continue
                 
-                # Simple keyword matching score
+                # 简单关键词匹配分数
                 content_lower = doc_data['content'].lower()
                 words = query_lower.split()
                 matched = sum(1 for w in words if w in content_lower)
@@ -393,10 +391,10 @@ class InMemoryVectorStore(BaseVectorStore):
                     source=doc_data['metadata'].get('source', doc_id)
                 ))
         
-        # Sort by score and return top_k
+        # 按分数排序并返回top_k
         results.sort(key=lambda x: x.score, reverse=True)
         
-        # Filter by threshold
+        # 按阈值过滤
         results = [r for r in results if r.score >= self.config.similarity_threshold]
         
         return results[:top_k]
@@ -413,40 +411,40 @@ class InMemoryVectorStore(BaseVectorStore):
 
 class RAGInterface:
     """
-    Main RAG interface for the test case generator.
+    测试用例生成器的主RAG接口。
     
-    Provides a unified interface for:
-    - Adding documents to the knowledge base
-    - Retrieving relevant documents
-    - Managing the vector store
+    提供统一接口用于：
+    - 向知识库添加文档
+    - 检索相关文档
+    - 管理向量存储
     
-    Usage:
-        # Initialize with config
+    使用方式:
+        # 使用配置初始化
         config = RAGConfig(enabled=True, embedding_api_key="sk-...")
         rag = RAGInterface(config)
         
-        # Add documents
+        # 添加文档
         rag.add_documents([
-            "Login test case requirements...",
-            "Payment flow test guidelines..."
+            "登录测试用例需求...",
+            "支付流程测试指南..."
         ])
         
-        # Retrieve relevant documents
-        docs = rag.retrieve("user authentication tests")
+        # 检索相关文档
+        docs = rag.retrieve("用户认证测试")
     """
     
     def __init__(self, config: Optional[RAGConfig] = None):
         """
-        Initialize the RAG interface.
+        初始化RAG接口。
         
-        Args:
-            config: RAG configuration, uses defaults if not provided
+        参数:
+            config: RAG配置，未提供时使用默认值
         """
         self.config = config or RAGConfig()
         self._vector_store: Optional[BaseVectorStore] = None
     
     def _get_vector_store(self) -> BaseVectorStore:
-        """Get or create the vector store instance."""
+        """获取或创建向量存储实例。"""
         if self._vector_store is None:
             store_type = self.config.vector_store_type.lower()
             
@@ -455,13 +453,13 @@ class RAGInterface:
             elif store_type == "memory":
                 self._vector_store = InMemoryVectorStore(self.config)
             else:
-                # Default to in-memory
+                # 默认使用内存存储
                 self._vector_store = InMemoryVectorStore(self.config)
         
         return self._vector_store
     
     def is_enabled(self) -> bool:
-        """Check if RAG is enabled."""
+        """检查RAG是否启用。"""
         return self.config.enabled
     
     def add_documents(
@@ -471,20 +469,20 @@ class RAGInterface:
         source: Optional[str] = None
     ) -> list[str]:
         """
-        Add documents to the knowledge base.
+        向知识库添加文档。
         
-        Args:
-            documents: List of document contents
-            metadatas: Optional metadata for each document
-            source: Optional source identifier to add to all documents
+        参数:
+            documents: 文档内容列表
+            metadatas: 每个文档的可选元数据
+            source: 要添加到所有文档的可选来源标识
             
-        Returns:
-            List of document IDs
+        返回:
+            文档ID列表
         """
         if not self.is_enabled():
             return []
         
-        # Add source to metadata if provided
+        # 如果提供了来源则添加到元数据
         if source and metadatas is None:
             metadatas = [{"source": source} for _ in documents]
         elif source and metadatas:
@@ -496,13 +494,13 @@ class RAGInterface:
     
     def add_from_file(self, file_path: str) -> list[str]:
         """
-        Add documents from a file.
+        从文件添加文档。
         
-        Args:
-            file_path: Path to the file
+        参数:
+            file_path: 文件路径
             
-        Returns:
-            List of document IDs
+        返回:
+            文档ID列表
         """
         if not self.is_enabled():
             return []
@@ -512,7 +510,7 @@ class RAGInterface:
         handler = InputHandler()
         processed = handler.process_file(file_path)
         
-        # Split content into chunks (simple approach)
+        # 将内容分割为块（简单方法）
         content = processed.text_content
         chunks = self._chunk_text(content)
         
@@ -527,15 +525,15 @@ class RAGInterface:
         overlap: int = 200
     ) -> list[str]:
         """
-        Split text into chunks with overlap.
+        将文本分割为带重叠的块。
         
-        Args:
-            text: Text to chunk
-            chunk_size: Target chunk size in characters
-            overlap: Overlap between chunks
+        参数:
+            text: 要分块的文本
+            chunk_size: 目标块大小（字符数）
+            overlap: 块之间的重叠
             
-        Returns:
-            List of text chunks
+        返回:
+            文本块列表
         """
         if len(text) <= chunk_size:
             return [text]
@@ -546,9 +544,9 @@ class RAGInterface:
         while start < len(text):
             end = start + chunk_size
             
-            # Try to break at sentence boundary
+            # 尝试在句子边界断开
             if end < len(text):
-                # Look for sentence ending
+                # 查找句子结尾
                 for sep in ['. ', '.\n', '\n\n']:
                     last_sep = text.rfind(sep, start, end)
                     if last_sep > start + chunk_size // 2:
@@ -567,15 +565,15 @@ class RAGInterface:
         filter_dict: Optional[dict] = None
     ) -> list[str]:
         """
-        Retrieve relevant documents for a query.
+        为查询检索相关文档。
         
-        Args:
-            query: Search query
-            top_k: Number of results (uses config default if not specified)
-            filter_dict: Optional metadata filter
+        参数:
+            query: 搜索查询
+            top_k: 结果数量（未指定时使用配置默认值）
+            filter_dict: 可选的元数据过滤器
             
-        Returns:
-            List of document contents
+        返回:
+            文档内容列表
         """
         if not self.is_enabled():
             return []
@@ -596,15 +594,15 @@ class RAGInterface:
         filter_dict: Optional[dict] = None
     ) -> list[RetrievedDocument]:
         """
-        Retrieve documents with similarity scores.
+        检索带相似度分数的文档。
         
-        Args:
-            query: Search query
-            top_k: Number of results
-            filter_dict: Optional metadata filter
+        参数:
+            query: 搜索查询
+            top_k: 结果数量
+            filter_dict: 可选的元数据过滤器
             
-        Returns:
-            List of RetrievedDocument objects
+        返回:
+            RetrievedDocument对象列表
         """
         if not self.is_enabled():
             return []
@@ -618,13 +616,13 @@ class RAGInterface:
     
     def delete_documents(self, ids: list[str]) -> bool:
         """
-        Delete documents by ID.
+        按ID删除文档。
         
-        Args:
-            ids: List of document IDs
+        参数:
+            ids: 文档ID列表
             
-        Returns:
-            True if successful
+        返回:
+            成功则返回True
         """
         if not self.is_enabled():
             return False
@@ -634,10 +632,10 @@ class RAGInterface:
     
     def clear(self) -> bool:
         """
-        Clear all documents from the knowledge base.
+        清除知识库中的所有文档。
         
-        Returns:
-            True if successful
+        返回:
+            成功则返回True
         """
         if not self.is_enabled():
             return False
@@ -647,21 +645,21 @@ class RAGInterface:
     
     def get_stats(self) -> dict:
         """
-        Get statistics about the knowledge base.
+        获取知识库的统计信息。
         
-        Returns:
-            Dictionary with stats
+        返回:
+            包含统计信息的字典
         """
         if not self.is_enabled():
             return {"enabled": False}
         
         store = self._get_vector_store()
         
-        # Get document count (implementation depends on store)
+        # 获取文档数量（实现取决于存储）
         if isinstance(store, InMemoryVectorStore):
             doc_count = len(store._documents)
         else:
-            doc_count = -1  # Unknown
+            doc_count = -1  # 未知
         
         return {
             "enabled": True,

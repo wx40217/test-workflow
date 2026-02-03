@@ -1,8 +1,8 @@
 """
-LangGraph workflow definition for test case generation.
+测试用例生成的LangGraph工作流定义。
 
-This module defines the complete workflow graph that orchestrates
-the three nodes: Generator -> Reviewer -> Optimizer
+本模块定义完整的工作流图，协调三个节点：
+生成器 -> 评审员 -> 优化器
 """
 
 from dataclasses import dataclass, field
@@ -23,24 +23,24 @@ from src.rag.interface import RAGInterface
 
 class WorkflowState(TypedDict):
     """
-    State definition for the workflow.
+    工作流的状态定义。
     
-    This state is passed between nodes and updated at each step.
+    此状态在节点之间传递，每一步都会更新。
     """
-    # Input data
+    # 输入数据
     user_input: str
     additional_instructions: str
     images: list[dict]
     output_format: str
     
-    # Intermediate results
+    # 中间结果
     generated_test_cases: str
     review_feedback: str
     
-    # Final output
+    # 最终输出
     final_test_cases: str
     
-    # Metadata
+    # 元数据
     errors: list[str]
     current_step: str
 
@@ -48,15 +48,15 @@ class WorkflowState(TypedDict):
 @dataclass
 class WorkflowResult:
     """
-    Container for workflow execution results.
+    工作流执行结果的容器。
     
-    Attributes:
-        success: Whether the workflow completed successfully
-        final_test_cases: The final optimized test cases
-        generated_test_cases: Initial test cases (before review)
-        review_feedback: Feedback from the reviewer
-        errors: Any errors that occurred
-        metadata: Additional metadata about the execution
+    属性:
+        success: 工作流是否成功完成
+        final_test_cases: 最终优化的测试用例
+        generated_test_cases: 初始测试用例（评审前）
+        review_feedback: 评审员的反馈
+        errors: 发生的任何错误
+        metadata: 执行的额外元数据
     """
     success: bool
     final_test_cases: str
@@ -68,16 +68,16 @@ class WorkflowResult:
 
 class TestCaseWorkflow:
     """
-    Main workflow class for test case generation.
+    测试用例生成的主工作流类。
     
-    Orchestrates the three-node workflow:
-    1. Generator: Creates initial test cases
-    2. Reviewer: Reviews and provides feedback
-    3. Optimizer: Creates final optimized test cases
+    协调三节点工作流：
+    1. 生成器：创建初始测试用例
+    2. 评审员：评审并提供反馈
+    3. 优化器：创建最终优化的测试用例
     
-    Usage:
+    使用方式:
         workflow = TestCaseWorkflow()
-        result = workflow.run("User requirements here")
+        result = workflow.run("用户需求内容")
         print(result.final_test_cases)
     """
     
@@ -90,16 +90,16 @@ class TestCaseWorkflow:
         output_format: str = "markdown"
     ):
         """
-        Initialize the workflow.
+        初始化工作流。
         
-        Args:
-            generator_config: Configuration for the generator node
-            reviewer_config: Configuration for the reviewer node
-            optimizer_config: Configuration for the optimizer node
-            rag_interface: Optional RAG interface for knowledge retrieval
-            output_format: Default output format (markdown/confluence)
+        参数:
+            generator_config: 生成器节点的配置
+            reviewer_config: 评审员节点的配置
+            optimizer_config: 优化器节点的配置
+            rag_interface: 可选的RAG接口用于知识检索
+            output_format: 默认输出格式 (markdown/confluence)
         """
-        # Create nodes
+        # 创建节点
         self.generator, self.reviewer, self.optimizer = create_nodes(
             generator_config=generator_config,
             reviewer_config=reviewer_config,
@@ -112,42 +112,42 @@ class TestCaseWorkflow:
         self.default_output_format = output_format
         self.rag_interface = rag_interface
         
-        # Build the workflow graph
+        # 构建工作流图
         self._graph = self._build_graph()
     
     def _build_graph(self) -> StateGraph:
         """
-        Build the LangGraph workflow.
+        构建LangGraph工作流。
         
-        Returns:
-            Compiled StateGraph
+        返回:
+            编译后的StateGraph
         """
-        # Create the graph with state schema
+        # 使用状态模式创建图
         workflow = StateGraph(WorkflowState)
         
-        # Add nodes
+        # 添加节点
         workflow.add_node("generate", self._generate_node)
         workflow.add_node("review", self._review_node)
         workflow.add_node("optimize", self._optimize_node)
         
-        # Define edges (linear flow: generate -> review -> optimize -> end)
+        # 定义边（线性流程：生成 -> 评审 -> 优化 -> 结束）
         workflow.set_entry_point("generate")
         workflow.add_edge("generate", "review")
         workflow.add_edge("review", "optimize")
         workflow.add_edge("optimize", END)
         
-        # Compile the graph
+        # 编译图
         return workflow.compile()
     
     def _generate_node(self, state: WorkflowState) -> dict:
         """
-        Generator node function.
+        生成器节点函数。
         
-        Args:
-            state: Current workflow state
+        参数:
+            state: 当前工作流状态
             
-        Returns:
-            Updated state fields
+        返回:
+            更新的状态字段
         """
         try:
             test_cases = self.generator.invoke(
@@ -162,24 +162,24 @@ class TestCaseWorkflow:
         except Exception as e:
             return {
                 "generated_test_cases": "",
-                "errors": state.get("errors", []) + [f"Generator error: {str(e)}"],
+                "errors": state.get("errors", []) + [f"生成器错误: {str(e)}"],
                 "current_step": "generate_error"
             }
     
     def _review_node(self, state: WorkflowState) -> dict:
         """
-        Reviewer node function.
+        评审员节点函数。
         
-        Args:
-            state: Current workflow state
+        参数:
+            state: 当前工作流状态
             
-        Returns:
-            Updated state fields
+        返回:
+            更新的状态字段
         """
-        # Skip review if generation failed
+        # 如果生成失败则跳过评审
         if not state.get("generated_test_cases"):
             return {
-                "review_feedback": "Skipped due to generation failure",
+                "review_feedback": "由于生成失败而跳过",
                 "current_step": "review_skipped"
             }
         
@@ -195,28 +195,28 @@ class TestCaseWorkflow:
         except Exception as e:
             return {
                 "review_feedback": "",
-                "errors": state.get("errors", []) + [f"Reviewer error: {str(e)}"],
+                "errors": state.get("errors", []) + [f"评审员错误: {str(e)}"],
                 "current_step": "review_error"
             }
     
     def _optimize_node(self, state: WorkflowState) -> dict:
         """
-        Optimizer node function.
+        优化器节点函数。
         
-        Args:
-            state: Current workflow state
+        参数:
+            state: 当前工作流状态
             
-        Returns:
-            Updated state fields
+        返回:
+            更新的状态字段
         """
-        # If both generation and review failed, return empty
+        # 如果生成和评审都失败，返回空
         if not state.get("generated_test_cases"):
             return {
                 "final_test_cases": "",
                 "current_step": "optimize_skipped"
             }
         
-        # If review failed but generation succeeded, use generated test cases as final
+        # 如果评审失败但生成成功，使用生成的测试用例作为最终结果
         if not state.get("review_feedback"):
             return {
                 "final_test_cases": state["generated_test_cases"],
@@ -235,10 +235,10 @@ class TestCaseWorkflow:
                 "current_step": "optimize_complete"
             }
         except Exception as e:
-            # Fall back to generated test cases on error
+            # 出错时回退到生成的测试用例
             return {
                 "final_test_cases": state["generated_test_cases"],
-                "errors": state.get("errors", []) + [f"Optimizer error: {str(e)}"],
+                "errors": state.get("errors", []) + [f"优化器错误: {str(e)}"],
                 "current_step": "optimize_error"
             }
     
@@ -248,14 +248,14 @@ class TestCaseWorkflow:
         additional_instructions: str = ""
     ) -> tuple[str, list[dict]]:
         """
-        Prepare input from various sources.
+        从各种来源准备输入。
         
-        Args:
-            input_source: Text, file path, list of inputs, or ProcessedInput
-            additional_instructions: Additional instructions
+        参数:
+            input_source: 文本、文件路径、输入列表或ProcessedInput
+            additional_instructions: 额外指示
             
-        Returns:
-            Tuple of (text_content, images)
+        返回:
+            (text_content, images) 元组
         """
         if isinstance(input_source, ProcessedInput):
             return input_source.text_content, input_source.images
@@ -264,7 +264,7 @@ class TestCaseWorkflow:
             return input_source.get_combined_text(), input_source.get_all_images()
         
         if isinstance(input_source, str):
-            # Try to process as file/directory first
+            # 首先尝试作为文件/目录处理
             processed = self.input_handler.process(input_source)
             if isinstance(processed, ProcessedInput):
                 return processed.text_content, processed.images
@@ -275,7 +275,7 @@ class TestCaseWorkflow:
             processed = self.input_handler.process_multiple(input_source)
             return processed.get_combined_text(), processed.get_all_images()
         
-        # Default: treat as text
+        # 默认：作为文本处理
         return str(input_source), []
     
     def run(
@@ -285,20 +285,20 @@ class TestCaseWorkflow:
         output_format: Optional[str] = None
     ) -> WorkflowResult:
         """
-        Run the complete workflow.
+        运行完整工作流。
         
-        Args:
-            input_source: User input (text, file path, list of inputs, etc.)
-            additional_instructions: Additional instructions for test case generation
-            output_format: Output format (markdown/confluence), uses default if not specified
+        参数:
+            input_source: 用户输入（文本、文件路径、输入列表等）
+            additional_instructions: 测试用例生成的额外指示
+            output_format: 输出格式 (markdown/confluence)，未指定时使用默认值
             
-        Returns:
-            WorkflowResult containing the final test cases and metadata
+        返回:
+            包含最终测试用例和元数据的WorkflowResult
         """
-        # Prepare input
+        # 准备输入
         text_content, images = self._prepare_input(input_source, additional_instructions)
         
-        # Initialize state
+        # 初始化状态
         initial_state: WorkflowState = {
             "user_input": text_content,
             "additional_instructions": additional_instructions,
@@ -311,11 +311,11 @@ class TestCaseWorkflow:
             "current_step": "start"
         }
         
-        # Run the workflow
+        # 运行工作流
         try:
             final_state = self._graph.invoke(initial_state)
             
-            # Build result
+            # 构建结果
             success = bool(final_state.get("final_test_cases"))
             return WorkflowResult(
                 success=success,
@@ -333,7 +333,7 @@ class TestCaseWorkflow:
             return WorkflowResult(
                 success=False,
                 final_test_cases="",
-                errors=[f"Workflow execution error: {str(e)}"]
+                errors=[f"工作流执行错误: {str(e)}"]
             )
     
     def run_step_by_step(
@@ -343,22 +343,22 @@ class TestCaseWorkflow:
         output_format: Optional[str] = None
     ):
         """
-        Run the workflow step by step, yielding results after each step.
+        逐步运行工作流，每一步后产出结果。
         
-        This is useful for streaming or progress tracking.
+        这对于流式处理或进度跟踪很有用。
         
-        Args:
-            input_source: User input
-            additional_instructions: Additional instructions
-            output_format: Output format
+        参数:
+            input_source: 用户输入
+            additional_instructions: 额外指示
+            output_format: 输出格式
             
-        Yields:
-            Tuple of (step_name, step_result)
+        产出:
+            (step_name, step_result) 元组
         """
-        # Prepare input
+        # 准备输入
         text_content, images = self._prepare_input(input_source, additional_instructions)
         
-        # Step 1: Generate
+        # 步骤1：生成
         yield ("generating", None)
         try:
             generated = self.generator.invoke(
@@ -371,7 +371,7 @@ class TestCaseWorkflow:
             yield ("generate_error", str(e))
             return
         
-        # Step 2: Review
+        # 步骤2：评审
         yield ("reviewing", None)
         try:
             feedback = self.reviewer.invoke(
@@ -381,10 +381,10 @@ class TestCaseWorkflow:
             yield ("reviewed", feedback)
         except Exception as e:
             yield ("review_error", str(e))
-            # Continue with generated test cases
+            # 继续使用生成的测试用例
             feedback = ""
         
-        # Step 3: Optimize
+        # 步骤3：优化
         yield ("optimizing", None)
         try:
             if feedback:
@@ -407,14 +407,14 @@ class TestCaseWorkflow:
         format_type: Optional[str] = None
     ) -> str:
         """
-        Format the test cases output.
+        格式化测试用例输出。
         
-        Args:
-            test_cases: The test cases to format
-            format_type: Output format (markdown/confluence)
+        参数:
+            test_cases: 要格式化的测试用例
+            format_type: 输出格式 (markdown/confluence)
             
-        Returns:
-            Formatted test cases
+        返回:
+            格式化的测试用例
         """
         output_format = OutputFormat(format_type or self.default_output_format)
         return self.output_formatter.format(test_cases, output_format)
@@ -431,24 +431,24 @@ def create_workflow(
     rag_config: Optional[dict] = None
 ) -> TestCaseWorkflow:
     """
-    Factory function to create a workflow with custom configuration.
+    创建自定义配置工作流的工厂函数。
     
-    This is a convenience function for quick setup.
+    这是一个便捷函数，用于快速设置。
     
-    Args:
-        api_key: API key (used for all nodes if individual keys not set)
-        base_url: Base URL (used for all nodes if individual URLs not set)
-        generator_model: Model name for generator node
-        reviewer_model: Model name for reviewer node
-        optimizer_model: Model name for optimizer node
-        output_format: Default output format
-        enable_rag: Whether to enable RAG
-        rag_config: RAG configuration dictionary
+    参数:
+        api_key: API密钥（如果未设置单独密钥，则用于所有节点）
+        base_url: 基础URL（如果未设置单独URL，则用于所有节点）
+        generator_model: 生成器节点的模型名称
+        reviewer_model: 评审员节点的模型名称
+        optimizer_model: 优化器节点的模型名称
+        output_format: 默认输出格式
+        enable_rag: 是否启用RAG
+        rag_config: RAG配置字典
         
-    Returns:
-        Configured TestCaseWorkflow instance
+    返回:
+        配置好的TestCaseWorkflow实例
     """
-    # Use provided values or fall back to settings
+    # 使用提供的值或回退到设置
     gen_key = api_key or settings.generator_api_key
     gen_url = base_url or settings.generator_base_url
     gen_model = generator_model or settings.generator_model_name
@@ -461,7 +461,7 @@ def create_workflow(
     opt_url = base_url or settings.optimizer_base_url
     opt_model = optimizer_model or settings.optimizer_model_name
     
-    # Create configs
+    # 创建配置
     generator_config = ModelConfig(
         api_key=gen_key,
         base_url=gen_url,
@@ -489,7 +489,7 @@ def create_workflow(
         timeout=settings.request_timeout
     )
     
-    # Create RAG interface if enabled
+    # 如果启用则创建RAG接口
     rag_interface = None
     if enable_rag:
         from src.rag.interface import RAGConfig

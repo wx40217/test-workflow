@@ -1,14 +1,14 @@
 """
-Input handlers for processing various input types.
+多种输入类型的处理器模块。
 
-Supported input types:
-- Plain text
-- Word documents (.docx)
-- PDF files (.pdf)
-- Excel files (.xlsx)
-- PowerPoint files (.pptx)
-- Images (with base64 encoding for vision models)
-- Multiple files/documents
+支持的输入类型：
+- 纯文本
+- Word文档 (.docx)
+- PDF文件 (.pdf)
+- Excel文件 (.xlsx)
+- PowerPoint文件 (.pptx)
+- 图片（使用base64编码用于视觉模型）
+- 多文件/文档
 """
 
 import base64
@@ -51,7 +51,7 @@ except ImportError:
 
 
 class InputType(Enum):
-    """Enumeration of supported input types."""
+    """支持的输入类型枚举。"""
     TEXT = "text"
     DOCX = "docx"
     PDF = "pdf"
@@ -64,14 +64,14 @@ class InputType(Enum):
 @dataclass
 class ProcessedInput:
     """
-    Container for processed input data.
+    处理后输入数据的容器。
     
-    Attributes:
-        input_type: Type of the original input
-        text_content: Extracted text content
-        images: List of base64-encoded images (for vision models)
-        metadata: Additional metadata about the input
-        source: Original source (file path or 'direct_text')
+    属性:
+        input_type: 原始输入的类型
+        text_content: 提取的文本内容
+        images: base64编码的图片列表（用于视觉模型）
+        metadata: 关于输入的额外元数据
+        source: 原始来源（文件路径或'direct_text'）
     """
     input_type: InputType
     text_content: str
@@ -80,69 +80,69 @@ class ProcessedInput:
     source: str = "direct_text"
     
     def has_images(self) -> bool:
-        """Check if the input contains images."""
+        """检查输入是否包含图片。"""
         return len(self.images) > 0
     
     def get_combined_content(self) -> str:
-        """Get all text content combined."""
+        """获取所有文本内容的组合。"""
         return self.text_content
 
 
 @dataclass
 class MultiInput:
     """
-    Container for multiple processed inputs.
+    多个处理后输入的容器。
     
-    Used when the user provides multiple files or mixed input types.
+    用于用户提供多个文件或混合输入类型时。
     """
     inputs: list[ProcessedInput] = field(default_factory=list)
     
     def add_input(self, processed_input: ProcessedInput) -> None:
-        """Add a processed input to the collection."""
+        """将处理后的输入添加到集合中。"""
         self.inputs.append(processed_input)
     
     def get_combined_text(self) -> str:
-        """Get all text content from all inputs combined."""
+        """获取所有输入的组合文本内容。"""
         texts = []
         for i, inp in enumerate(self.inputs):
-            header = f"\n--- Document {i + 1} ({inp.source}) ---\n"
+            header = f"\n--- 文档 {i + 1} ({inp.source}) ---\n"
             texts.append(header + inp.text_content)
         return "\n".join(texts)
     
     def get_all_images(self) -> list[dict]:
-        """Get all images from all inputs."""
+        """获取所有输入中的所有图片。"""
         images = []
         for inp in self.inputs:
             images.extend(inp.images)
         return images
     
     def has_images(self) -> bool:
-        """Check if any input contains images."""
+        """检查是否有任何输入包含图片。"""
         return any(inp.has_images() for inp in self.inputs)
 
 
 class BaseHandler(ABC):
-    """Abstract base class for input handlers."""
+    """输入处理器的抽象基类。"""
     
     @abstractmethod
     def can_handle(self, input_source: Union[str, Path]) -> bool:
-        """Check if this handler can process the given input."""
+        """检查此处理器是否能处理给定的输入。"""
         pass
     
     @abstractmethod
     def process(self, input_source: Union[str, Path, bytes]) -> ProcessedInput:
-        """Process the input and return processed data."""
+        """处理输入并返回处理后的数据。"""
         pass
 
 
 class TextHandler(BaseHandler):
-    """Handler for plain text input."""
+    """纯文本输入的处理器。"""
     
     SUPPORTED_EXTENSIONS = {'.txt', '.md', '.rst', '.csv', '.json', '.xml', '.yaml', '.yml'}
     
     def can_handle(self, input_source: Union[str, Path]) -> bool:
         if isinstance(input_source, str) and not os.path.exists(input_source):
-            # Treat as direct text input
+            # 作为直接文本输入处理
             return True
         
         path = Path(input_source)
@@ -150,7 +150,7 @@ class TextHandler(BaseHandler):
     
     def process(self, input_source: Union[str, Path, bytes]) -> ProcessedInput:
         if isinstance(input_source, bytes):
-            # Detect encoding
+            # 检测编码
             if chardet:
                 detected = chardet.detect(input_source)
                 encoding = detected.get('encoding', 'utf-8')
@@ -164,20 +164,20 @@ class TextHandler(BaseHandler):
             )
         
         if isinstance(input_source, str) and not os.path.exists(input_source):
-            # Direct text input
+            # 直接文本输入
             return ProcessedInput(
                 input_type=InputType.TEXT,
                 text_content=input_source,
                 source="direct_text"
             )
         
-        # File input
+        # 文件输入
         path = Path(input_source)
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 text = f.read()
         except UnicodeDecodeError:
-            # Try with detected encoding
+            # 使用检测到的编码重试
             with open(path, 'rb') as f:
                 raw = f.read()
             if chardet:
@@ -196,7 +196,7 @@ class TextHandler(BaseHandler):
 
 
 class DocxHandler(BaseHandler):
-    """Handler for Word documents (.docx)."""
+    """Word文档(.docx)的处理器。"""
     
     def can_handle(self, input_source: Union[str, Path]) -> bool:
         if DocxDocument is None:
@@ -206,18 +206,18 @@ class DocxHandler(BaseHandler):
     
     def process(self, input_source: Union[str, Path, bytes]) -> ProcessedInput:
         if DocxDocument is None:
-            raise ImportError("python-docx is required for processing .docx files")
+            raise ImportError("处理.docx文件需要python-docx库")
         
         path = Path(input_source)
         doc = DocxDocument(path)
         
-        # Extract text from paragraphs
+        # 从段落提取文本
         paragraphs = []
         for para in doc.paragraphs:
             if para.text.strip():
                 paragraphs.append(para.text)
         
-        # Extract text from tables
+        # 从表格提取文本
         table_texts = []
         for table in doc.tables:
             table_content = []
@@ -228,7 +228,7 @@ class DocxHandler(BaseHandler):
         
         text_content = "\n\n".join(paragraphs)
         if table_texts:
-            text_content += "\n\n--- Tables ---\n" + "\n\n".join(table_texts)
+            text_content += "\n\n--- 表格 ---\n" + "\n\n".join(table_texts)
         
         return ProcessedInput(
             input_type=InputType.DOCX,
@@ -243,7 +243,7 @@ class DocxHandler(BaseHandler):
 
 
 class PdfHandler(BaseHandler):
-    """Handler for PDF files (.pdf)."""
+    """PDF文件(.pdf)的处理器。"""
     
     def can_handle(self, input_source: Union[str, Path]) -> bool:
         if PdfReader is None:
@@ -253,7 +253,7 @@ class PdfHandler(BaseHandler):
     
     def process(self, input_source: Union[str, Path, bytes]) -> ProcessedInput:
         if PdfReader is None:
-            raise ImportError("pypdf is required for processing PDF files")
+            raise ImportError("处理PDF文件需要pypdf库")
         
         path = Path(input_source)
         reader = PdfReader(path)
@@ -262,7 +262,7 @@ class PdfHandler(BaseHandler):
         for i, page in enumerate(reader.pages):
             page_text = page.extract_text()
             if page_text and page_text.strip():
-                pages_text.append(f"--- Page {i + 1} ---\n{page_text}")
+                pages_text.append(f"--- 第 {i + 1} 页 ---\n{page_text}")
         
         text_content = "\n\n".join(pages_text)
         
@@ -278,7 +278,7 @@ class PdfHandler(BaseHandler):
 
 
 class ExcelHandler(BaseHandler):
-    """Handler for Excel files (.xlsx)."""
+    """Excel文件(.xlsx)的处理器。"""
     
     def can_handle(self, input_source: Union[str, Path]) -> bool:
         if load_workbook is None:
@@ -288,7 +288,7 @@ class ExcelHandler(BaseHandler):
     
     def process(self, input_source: Union[str, Path, bytes]) -> ProcessedInput:
         if load_workbook is None:
-            raise ImportError("openpyxl is required for processing Excel files")
+            raise ImportError("处理Excel文件需要openpyxl库")
         
         path = Path(input_source)
         wb = load_workbook(path, data_only=True)
@@ -303,7 +303,7 @@ class ExcelHandler(BaseHandler):
                     rows.append(" | ".join(row_values))
             
             if rows:
-                sheets_text.append(f"--- Sheet: {sheet_name} ---\n" + "\n".join(rows))
+                sheets_text.append(f"--- 工作表: {sheet_name} ---\n" + "\n".join(rows))
         
         text_content = "\n\n".join(sheets_text)
         
@@ -320,7 +320,7 @@ class ExcelHandler(BaseHandler):
 
 
 class PowerPointHandler(BaseHandler):
-    """Handler for PowerPoint files (.pptx)."""
+    """PowerPoint文件(.pptx)的处理器。"""
     
     def can_handle(self, input_source: Union[str, Path]) -> bool:
         if Presentation is None:
@@ -330,7 +330,7 @@ class PowerPointHandler(BaseHandler):
     
     def process(self, input_source: Union[str, Path, bytes]) -> ProcessedInput:
         if Presentation is None:
-            raise ImportError("python-pptx is required for processing PowerPoint files")
+            raise ImportError("处理PowerPoint文件需要python-pptx库")
         
         path = Path(input_source)
         prs = Presentation(path)
@@ -343,7 +343,7 @@ class PowerPointHandler(BaseHandler):
                     slide_content.append(shape.text)
             
             if slide_content:
-                slides_text.append(f"--- Slide {i + 1} ---\n" + "\n".join(slide_content))
+                slides_text.append(f"--- 幻灯片 {i + 1} ---\n" + "\n".join(slide_content))
         
         text_content = "\n\n".join(slides_text)
         
@@ -360,9 +360,9 @@ class PowerPointHandler(BaseHandler):
 
 class ImageHandler(BaseHandler):
     """
-    Handler for image files.
+    图片文件的处理器。
     
-    Converts images to base64 for use with vision-capable models.
+    将图片转换为base64格式，用于视觉模型。
     """
     
     SUPPORTED_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'}
@@ -374,13 +374,13 @@ class ImageHandler(BaseHandler):
     def process(self, input_source: Union[str, Path, bytes]) -> ProcessedInput:
         path = Path(input_source)
         
-        # Read and encode image
+        # 读取并编码图片
         with open(path, 'rb') as f:
             image_data = f.read()
         
         base64_image = base64.b64encode(image_data).decode('utf-8')
         
-        # Determine MIME type
+        # 确定MIME类型
         extension = path.suffix.lower()
         mime_types = {
             '.png': 'image/png',
@@ -392,7 +392,7 @@ class ImageHandler(BaseHandler):
         }
         mime_type = mime_types.get(extension, 'image/png')
         
-        # Get image dimensions if PIL is available
+        # 如果PIL可用，获取图片尺寸
         metadata = {"file_name": path.name}
         if Image:
             try:
@@ -413,7 +413,7 @@ class ImageHandler(BaseHandler):
         
         return ProcessedInput(
             input_type=InputType.IMAGE,
-            text_content=f"[Image: {path.name}]",
+            text_content=f"[图片: {path.name}]",
             images=[image_info],
             source=str(path),
             metadata=metadata
@@ -422,22 +422,22 @@ class ImageHandler(BaseHandler):
 
 class InputHandler:
     """
-    Main input handler that delegates to specific handlers based on input type.
+    主输入处理器，根据输入类型委托给特定处理器。
     
-    Usage:
+    使用方式:
         handler = InputHandler()
         
-        # Process single text input
-        result = handler.process_text("Some requirements text")
+        # 处理单个文本输入
+        result = handler.process_text("一些需求文本")
         
-        # Process single file
+        # 处理单个文件
         result = handler.process_file("requirements.docx")
         
-        # Process multiple inputs
+        # 处理多个输入
         result = handler.process_multiple([
             "requirements.docx",
             "screenshots/",
-            "Additional notes here"
+            "额外说明"
         ])
     """
     
@@ -448,25 +448,25 @@ class InputHandler:
             ExcelHandler(),
             PowerPointHandler(),
             ImageHandler(),
-            TextHandler(),  # TextHandler should be last as it's the fallback
+            TextHandler(),  # TextHandler应该放在最后作为回退
         ]
     
     def _get_handler(self, input_source: Union[str, Path]) -> BaseHandler:
-        """Get the appropriate handler for the input source."""
+        """获取输入源的适当处理器。"""
         for handler in self.handlers:
             if handler.can_handle(input_source):
                 return handler
-        return self.handlers[-1]  # Default to TextHandler
+        return self.handlers[-1]  # 默认使用TextHandler
     
     def process_text(self, text: str) -> ProcessedInput:
         """
-        Process direct text input.
+        处理直接文本输入。
         
-        Args:
-            text: The text content to process
+        参数:
+            text: 要处理的文本内容
             
-        Returns:
-            ProcessedInput containing the text
+        返回:
+            包含文本的ProcessedInput
         """
         return ProcessedInput(
             input_type=InputType.TEXT,
@@ -476,17 +476,17 @@ class InputHandler:
     
     def process_file(self, file_path: Union[str, Path]) -> ProcessedInput:
         """
-        Process a single file.
+        处理单个文件。
         
-        Args:
-            file_path: Path to the file to process
+        参数:
+            file_path: 要处理的文件路径
             
-        Returns:
-            ProcessedInput containing the extracted content
+        返回:
+            包含提取内容的ProcessedInput
         """
         path = Path(file_path)
         if not path.exists():
-            raise FileNotFoundError(f"File not found: {file_path}")
+            raise FileNotFoundError(f"文件未找到: {file_path}")
         
         handler = self._get_handler(path)
         return handler.process(path)
@@ -497,29 +497,29 @@ class InputHandler:
         recursive: bool = True
     ) -> MultiInput:
         """
-        Process all supported files in a directory.
+        处理目录中的所有支持文件。
         
-        Args:
-            dir_path: Path to the directory
-            recursive: Whether to process subdirectories
+        参数:
+            dir_path: 目录路径
+            recursive: 是否处理子目录
             
-        Returns:
-            MultiInput containing all processed files
+        返回:
+            包含所有处理文件的MultiInput
         """
         path = Path(dir_path)
         if not path.is_dir():
-            raise NotADirectoryError(f"Not a directory: {dir_path}")
+            raise NotADirectoryError(f"不是目录: {dir_path}")
         
         multi_input = MultiInput()
         
-        # Get all supported extensions
+        # 获取所有支持的扩展名
         supported_extensions = set()
         for handler in self.handlers:
             if hasattr(handler, 'SUPPORTED_EXTENSIONS'):
                 supported_extensions.update(handler.SUPPORTED_EXTENSIONS)
         supported_extensions.update({'.docx', '.pdf', '.xlsx', '.pptx'})
         
-        # Find and process files
+        # 查找并处理文件
         pattern = '**/*' if recursive else '*'
         for file_path in path.glob(pattern):
             if file_path.is_file() and file_path.suffix.lower() in supported_extensions:
@@ -527,8 +527,8 @@ class InputHandler:
                     processed = self.process_file(file_path)
                     multi_input.add_input(processed)
                 except Exception as e:
-                    # Log error but continue processing other files
-                    print(f"Warning: Failed to process {file_path}: {e}")
+                    # 记录错误但继续处理其他文件
+                    print(f"警告: 处理 {file_path} 失败: {e}")
         
         return multi_input
     
@@ -537,13 +537,13 @@ class InputHandler:
         inputs: list[Union[str, Path]]
     ) -> MultiInput:
         """
-        Process multiple inputs (files, directories, or text).
+        处理多个输入（文件、目录或文本）。
         
-        Args:
-            inputs: List of file paths, directory paths, or text strings
+        参数:
+            inputs: 文件路径、目录路径或文本字符串的列表
             
-        Returns:
-            MultiInput containing all processed inputs
+        返回:
+            包含所有处理输入的MultiInput
         """
         multi_input = MultiInput()
         
@@ -559,7 +559,7 @@ class InputHandler:
                     for inp in dir_result.inputs:
                         multi_input.add_input(inp)
             else:
-                # Treat as direct text input
+                # 作为直接文本输入处理
                 processed = self.process_text(str(input_item))
                 multi_input.add_input(processed)
         
@@ -570,13 +570,13 @@ class InputHandler:
         input_source: Union[str, Path, list[Union[str, Path]]]
     ) -> Union[ProcessedInput, MultiInput]:
         """
-        Universal processing method that handles any input type.
+        通用处理方法，处理任何输入类型。
         
-        Args:
-            input_source: Single input (text/file/directory) or list of inputs
+        参数:
+            input_source: 单个输入（文本/文件/目录）或输入列表
             
-        Returns:
-            ProcessedInput for single input, MultiInput for multiple inputs
+        返回:
+            单个输入返回ProcessedInput，多个输入返回MultiInput
         """
         if isinstance(input_source, list):
             return self.process_multiple(input_source)
@@ -584,7 +584,7 @@ class InputHandler:
         path = Path(input_source) if isinstance(input_source, str) else input_source
         
         if isinstance(input_source, str) and not path.exists():
-            # Direct text input
+            # 直接文本输入
             return self.process_text(input_source)
         
         if path.is_file():

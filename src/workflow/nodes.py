@@ -1,10 +1,10 @@
 """
-LLM nodes for the test case generation workflow.
+测试用例生成工作流的LLM节点模块。
 
-This module defines three main nodes:
-1. GeneratorNode - Generates initial test cases from user input
-2. ReviewerNode - Reviews test cases and provides feedback
-3. OptimizerNode - Optimizes test cases based on feedback
+本模块定义三个主要节点：
+1. GeneratorNode - 根据用户输入生成初始测试用例
+2. ReviewerNode - 评审测试用例并提供反馈
+3. OptimizerNode - 根据反馈优化测试用例
 """
 
 from typing import Any, Optional
@@ -21,7 +21,7 @@ from src.rag.interface import RAGInterface
 
 
 class BaseNode:
-    """Base class for all LLM nodes."""
+    """所有LLM节点的基类。"""
     
     def __init__(
         self,
@@ -29,21 +29,21 @@ class BaseNode:
         rag_interface: Optional[RAGInterface] = None
     ):
         """
-        Initialize the node.
+        初始化节点。
         
-        Args:
-            config: Model configuration (uses default if not provided)
-            rag_interface: Optional RAG interface for knowledge retrieval
+        参数:
+            config: 模型配置（未提供时使用默认配置）
+            rag_interface: 可选的RAG接口，用于知识检索
         """
         self.config = config
         self.rag_interface = rag_interface
         self._llm = None
     
     def _get_llm(self) -> ChatOpenAI:
-        """Get or create the LLM instance."""
+        """获取或创建LLM实例。"""
         if self._llm is None:
             if self.config is None:
-                raise ValueError("Model configuration is required")
+                raise ValueError("需要模型配置")
             
             self._llm = ChatOpenAI(
                 api_key=self.config.api_key,
@@ -57,13 +57,13 @@ class BaseNode:
     
     def _get_rag_context(self, query: str) -> str:
         """
-        Retrieve relevant context from RAG if enabled.
+        从RAG检索相关上下文（如果启用）。
         
-        Args:
-            query: The query to search for
+        参数:
+            query: 搜索查询
             
-        Returns:
-            Retrieved context as a formatted string
+        返回:
+            格式化的检索上下文字符串
         """
         if self.rag_interface is None or not self.rag_interface.is_enabled():
             return ""
@@ -76,7 +76,7 @@ class BaseNode:
                     context_parts.append(f"{i}. {doc}")
                 return "\n".join(context_parts)
         except Exception as e:
-            print(f"Warning: RAG retrieval failed: {e}")
+            print(f"警告: RAG检索失败: {e}")
         
         return ""
     
@@ -87,20 +87,20 @@ class BaseNode:
         images: Optional[list[dict]] = None
     ) -> list:
         """
-        Create message list for LLM invocation.
+        创建LLM调用的消息列表。
         
-        Args:
-            system_prompt: The system prompt
-            user_prompt: The user prompt
-            images: Optional list of images (for vision models)
+        参数:
+            system_prompt: 系统提示词
+            user_prompt: 用户提示词
+            images: 可选的图片列表（用于视觉模型）
             
-        Returns:
-            List of messages
+        返回:
+            消息列表
         """
         messages = [SystemMessage(content=system_prompt)]
         
         if images:
-            # For vision models, include images in the user message
+            # 对于视觉模型，在用户消息中包含图片
             content = [{"type": "text", "text": user_prompt}]
             for img in images:
                 content.append(img)
@@ -112,20 +112,20 @@ class BaseNode:
     
     def invoke(self, **kwargs) -> str:
         """
-        Invoke the node. Must be implemented by subclasses.
+        调用节点。必须由子类实现。
         
-        Returns:
-            The LLM response as a string
+        返回:
+            LLM响应字符串
         """
-        raise NotImplementedError("Subclasses must implement invoke()")
+        raise NotImplementedError("子类必须实现invoke()方法")
 
 
 class GeneratorNode(BaseNode):
     """
-    Node 1: Test Case Generator
+    节点一：测试用例生成器
     
-    Responsible for generating initial test cases from user input.
-    Uses the configured generator model (default: same as optimizer).
+    负责根据用户输入生成初始测试用例。
+    使用配置的生成器模型（默认与优化器相同）。
     """
     
     def __init__(
@@ -142,27 +142,27 @@ class GeneratorNode(BaseNode):
         images: Optional[list[dict]] = None
     ) -> str:
         """
-        Generate test cases from user input.
+        根据用户输入生成测试用例。
         
-        Args:
-            user_input: The user's input (requirements, etc.)
-            additional_instructions: Additional instructions from user
-            images: Optional images (for vision models)
+        参数:
+            user_input: 用户输入（需求等）
+            additional_instructions: 用户的额外指示
+            images: 可选的图片（用于视觉模型）
             
-        Returns:
-            Generated test cases as a string
+        返回:
+            生成的测试用例字符串
         """
-        # Get RAG context if available
+        # 获取RAG上下文（如果可用）
         rag_context = self._get_rag_context(user_input)
         
-        # Get prompts
+        # 获取提示词
         system_prompt, user_prompt = PromptTemplates.get_generator_prompts(
             user_input=user_input,
             additional_instructions=additional_instructions,
             rag_context=rag_context
         )
         
-        # Create messages and invoke LLM
+        # 创建消息并调用LLM
         messages = self._create_messages(system_prompt, user_prompt, images)
         llm = self._get_llm()
         response = llm.invoke(messages)
@@ -172,10 +172,10 @@ class GeneratorNode(BaseNode):
 
 class ReviewerNode(BaseNode):
     """
-    Node 2: Test Case Reviewer
+    节点二：测试用例评审员
     
-    Responsible for reviewing generated test cases and providing feedback.
-    Uses a more powerful reasoning model for thorough analysis.
+    负责评审生成的测试用例并提供反馈。
+    使用更强大的推理模型进行深入分析。
     """
     
     def __init__(
@@ -191,26 +191,26 @@ class ReviewerNode(BaseNode):
         test_cases: str
     ) -> str:
         """
-        Review the generated test cases.
+        评审生成的测试用例。
         
-        Args:
-            original_input: The original user input
-            test_cases: The test cases generated by the generator node
+        参数:
+            original_input: 原始用户输入
+            test_cases: 生成器节点生成的测试用例
             
-        Returns:
-            Review feedback as a string
+        返回:
+            评审反馈字符串
         """
-        # Get RAG context if available
+        # 获取RAG上下文（如果可用）
         rag_context = self._get_rag_context(original_input)
         
-        # Get prompts
+        # 获取提示词
         system_prompt, user_prompt = PromptTemplates.get_reviewer_prompts(
             original_input=original_input,
             test_cases=test_cases,
             rag_context=rag_context
         )
         
-        # Create messages and invoke LLM
+        # 创建消息并调用LLM
         messages = self._create_messages(system_prompt, user_prompt)
         llm = self._get_llm()
         response = llm.invoke(messages)
@@ -220,10 +220,10 @@ class ReviewerNode(BaseNode):
 
 class OptimizerNode(BaseNode):
     """
-    Node 3: Test Case Optimizer
+    节点三：测试用例优化器
     
-    Responsible for optimizing test cases based on review feedback.
-    Uses the same model as the generator for consistency.
+    负责根据评审反馈优化测试用例。
+    为保持一致性，使用与生成器相同的模型。
     """
     
     def __init__(
@@ -241,21 +241,21 @@ class OptimizerNode(BaseNode):
         output_format: str = "markdown"
     ) -> str:
         """
-        Optimize test cases based on review feedback.
+        根据评审反馈优化测试用例。
         
-        Args:
-            original_input: The original user input
-            initial_test_cases: The initial test cases from generator
-            review_feedback: The feedback from the reviewer
-            output_format: Desired output format (markdown/confluence)
+        参数:
+            original_input: 原始用户输入
+            initial_test_cases: 生成器的初始测试用例
+            review_feedback: 评审员的反馈
+            output_format: 期望的输出格式 (markdown/confluence)
             
-        Returns:
-            Optimized test cases as a string
+        返回:
+            优化后的测试用例字符串
         """
-        # Get RAG context if available
+        # 获取RAG上下文（如果可用）
         rag_context = self._get_rag_context(original_input)
         
-        # Get prompts
+        # 获取提示词
         system_prompt, user_prompt = PromptTemplates.get_optimizer_prompts(
             original_input=original_input,
             initial_test_cases=initial_test_cases,
@@ -264,7 +264,7 @@ class OptimizerNode(BaseNode):
             rag_context=rag_context
         )
         
-        # Create messages and invoke LLM
+        # 创建消息并调用LLM
         messages = self._create_messages(system_prompt, user_prompt)
         llm = self._get_llm()
         response = llm.invoke(messages)
@@ -279,16 +279,16 @@ def create_nodes(
     rag_interface: Optional[RAGInterface] = None
 ) -> tuple[GeneratorNode, ReviewerNode, OptimizerNode]:
     """
-    Factory function to create all three nodes.
+    创建所有三个节点的工厂函数。
     
-    Args:
-        generator_config: Configuration for the generator node
-        reviewer_config: Configuration for the reviewer node
-        optimizer_config: Configuration for the optimizer node
-        rag_interface: Optional shared RAG interface
+    参数:
+        generator_config: 生成器节点的配置
+        reviewer_config: 评审员节点的配置
+        optimizer_config: 优化器节点的配置
+        rag_interface: 可选的共享RAG接口
         
-    Returns:
-        Tuple of (GeneratorNode, ReviewerNode, OptimizerNode)
+    返回:
+        (GeneratorNode, ReviewerNode, OptimizerNode) 元组
     """
     generator = GeneratorNode(generator_config, rag_interface)
     reviewer = ReviewerNode(reviewer_config, rag_interface)
