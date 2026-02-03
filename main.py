@@ -36,6 +36,24 @@ from src.output_formatter.formatters import OutputFormatter, OutputFormat
 from src.rag.interface import RAGInterface, RAGConfig
 
 
+def load_prompts_config(config_file: str = None) -> None:
+    """
+    加载提示词配置文件。
+    
+    Args:
+        config_file: 配置文件路径，支持JSON/YAML格式
+    """
+    if config_file is None:
+        config_file = os.getenv("PROMPTS_CONFIG_FILE")
+    
+    if config_file and os.path.exists(config_file):
+        try:
+            PromptTemplates.load_from_file(config_file)
+            print(f"已加载提示词配置: {config_file}")
+        except Exception as e:
+            print(f"警告: 加载提示词配置失败: {e}")
+
+
 def generate_test_cases(
     input_content: str,
     api_key: str = None,
@@ -359,7 +377,17 @@ Examples:
         help="Documents to add to RAG knowledge base"
     )
     
+    # Prompt configuration
+    parser.add_argument(
+        "--prompts-config",
+        type=str,
+        help="Path to prompts configuration file (JSON/YAML)"
+    )
+    
     args = parser.parse_args()
+    
+    # Load prompts configuration if specified
+    load_prompts_config(args.prompts_config)
     
     # Handle interactive mode
     if args.interactive:
