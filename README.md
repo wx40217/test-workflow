@@ -1,6 +1,6 @@
 # 测试用例生成器工作流
 
-基于 LangGraph 的智能测试用例生成工作流，通过三个 LLM 节点协作完成测试用例的生成、评审和优化。
+基于 LangGraph 的智能测试用例生成工作流，通过多个 LLM 节点协作完成测试用例的生成、评审和优化。
 
 ## 目录
 
@@ -14,10 +14,13 @@
 
 ## 功能特性
 
-- **三节点工作流**: 生成 -> 评审 -> 优化，确保测试用例质量
+- **多节点工作流**: 分析(可选) -> 生成 -> 评审 -> 优化，确保测试用例质量
+- **智能需求分析**: 可选的需求分析节点，自动识别复杂需求并进行结构化分析
+- **实时进度显示**: 执行过程中显示详细进度和耗时统计
 - **多种输入支持**: 文本、Word、PDF、Excel、PowerPoint、图片
 - **灵活的模型配置**: 每个节点可独立配置不同的模型
 - **多种输出格式**: Markdown 嵌套列表、Confluence 任务列表
+- **自动保存**: 支持自动保存到 outputs 目录
 - **RAG 支持**: 预留知识库检索增强接口
 - **可配置提示词**: 支持自定义各节点的提示词
 
@@ -28,6 +31,9 @@
 ├── main.py                      # 主程序入口
 ├── requirements.txt             # Python 依赖
 ├── .env.example                 # 环境变量配置示例
+├── inputs/                      # 需求文件目录（txt/md/docx/pdf/图片等）
+├── templates/                   # 测试模板目录（C端/B端等）
+├── outputs/                     # 输出目录（生成的测试用例）
 ├── config/
 │   ├── __init__.py
 │   ├── settings.py              # 配置管理
@@ -37,7 +43,7 @@
 │   ├── __init__.py
 │   ├── workflow/
 │   │   ├── __init__.py
-│   │   ├── nodes.py             # LLM 节点定义
+│   │   ├── nodes.py             # LLM 节点定义（含分析器节点）
 │   │   └── graph.py             # LangGraph 工作流
 │   ├── input_handler/
 │   │   ├── __init__.py
@@ -51,6 +57,14 @@
 └── examples/
     └── basic_usage.py           # 使用示例
 ```
+
+### 目录说明
+
+| 目录 | 说明 |
+|------|------|
+| `inputs/` | 存放需求文件，支持 txt、md、docx、pdf、png、jpg 等格式 |
+| `templates/` | 存放测试模板文件，如 C端测试模板、B端测试模板等 |
+| `outputs/` | 生成的测试用例输出目录，使用 `--auto-save` 时自动保存到此目录 |
 
 ## 安装配置
 
@@ -103,16 +117,60 @@ python main.py --help
 python main.py --input "用户登录功能：支持邮箱密码登录，3次失败锁定账户"
 ```
 
+执行时会显示实时进度：
+
+```
+==================================================
+  测试用例生成工作流
+==================================================
+
+[分析] - 未启用
+[生成] 正在生成初始测试用例...
+[生成] ✓ 完成
+[评审] 正在评审测试用例...
+[评审] ✓ 完成
+[优化] 正在优化测试用例...
+[优化] ✓ 完成
+
+==================================================
+  ✓ 生成完成 | 耗时: 45.2秒
+  测试点数量: 18
+==================================================
+```
+
 **文件输入：**
 
 ```bash
 python main.py --file requirements.docx
+# 或从 inputs 目录读取
+python main.py --file inputs/login_requirement.md
 ```
 
 **多文件输入：**
 
 ```bash
 python main.py --files doc1.pdf doc2.docx screenshot.png
+```
+
+**自动保存到 outputs 目录：**
+
+```bash
+python main.py --input "用户登录功能" --auto-save
+# 输出文件: outputs/20240204_153022_用户登录功能.md
+```
+
+**指定输出文件：**
+
+```bash
+python main.py --input "..." --output test_cases.md
+```
+
+**静默模式（不显示进度）：**
+
+```bash
+python main.py --input "..." --quiet
+# 或
+python main.py --input "..." -q
 ```
 
 **指定输出格式：**
@@ -123,18 +181,6 @@ python main.py --input "..." --format markdown
 
 # Confluence 任务列表格式
 python main.py --input "..." --format confluence
-```
-
-**输出到文件：**
-
-```bash
-python main.py --input "..." --output test_cases.md
-```
-
-**显示详细进度：**
-
-```bash
-python main.py --input "..." --verbose
 ```
 
 **使用自定义模型：**
@@ -236,13 +282,35 @@ result = generate_test_cases(
 
 ### 环境变量配置
 
+#### 工作流配置
+
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
+| `ENABLE_ANALYZER` | 是否启用需求分析节点 | false |
+| `ANALYZER_COMPLEXITY_THRESHOLD` | 复杂度阈值（1-5），满足几个指标时触发分析 | 2 |
+| `MAX_REVIEW_ROUNDS` | 最大评审轮次（预留） | 1 |
+
+**复杂度指标说明：**
+- 需求描述超过 200 字符
+- 逗号数量超过 5 个（多个子需求）
+- 包含复合逻辑词（并且、同时、以及、或者等）
+- 包含问号（有不确定性）
+- 换行数超过 3 个
+
+#### 节点配置
+
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `ANALYZER_API_KEY` | 分析器节点的 API 密钥（未配置时使用生成器配置） | - |
+| `ANALYZER_BASE_URL` | 分析器 API 基础 URL | https://api.openai.com/v1 |
+| `ANALYZER_MODEL_NAME` | 分析器使用的模型 | gpt-4o |
+| `ANALYZER_TEMPERATURE` | 分析器采样温度 | 0.3 |
+| `ANALYZER_MAX_TOKENS` | 分析器最大 token 数 | 4096 |
 | `GENERATOR_API_KEY` | 生成器节点的 API 密钥 | - |
 | `GENERATOR_BASE_URL` | 生成器 API 基础 URL | https://api.openai.com/v1 |
 | `GENERATOR_MODEL_NAME` | 生成器使用的模型 | gpt-4o |
 | `GENERATOR_TEMPERATURE` | 生成器采样温度 | 0.7 |
-| `GENERATOR_MAX_TOKENS` | 生成器最大 token 数 | 4096 |
+| `GENERATOR_MAX_TOKENS` | 生成器最大 token 数 | 8192 |
 | `REVIEWER_API_KEY` | 评审员节点的 API 密钥 | - |
 | `REVIEWER_BASE_URL` | 评审员 API 基础 URL | https://api.openai.com/v1 |
 | `REVIEWER_MODEL_NAME` | 评审员使用的模型 | o1-preview |

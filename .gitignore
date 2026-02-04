@@ -168,12 +168,8 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
-# PyCharm
-#  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#  and can be added to the global gitignore or merged into this file.  For a more nuclear
-#  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
+# PyCharm / JetBrains
+.idea/
 
 # Abstra
 # Abstra is an AI-powered process automation framework.
@@ -182,10 +178,6 @@ cython_debug/
 .abstra/
 
 # Visual Studio Code
-#  Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore 
-#  that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
-#  and can be added to the global gitignore or merged into this file. However, if you prefer, 
-#  you could uncomment the following to ignore the entire vscode folder
 # .vscode/
 
 # Ruff stuff:
@@ -205,3 +197,19 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# ============================================
+# 项目特定配置
+# ============================================
+
+# 输出目录中的生成文件（保留 .gitkeep）
+outputs/*
+!outputs/.gitkeep
+
+# 输入目录中的用户文件（保留 .gitkeep）
+inputs/*
+!inputs/.gitkeep
+
+# 模板目录中的用户文件（保留 .gitkeep）
+templates/*
+!templates/.gitkeep
