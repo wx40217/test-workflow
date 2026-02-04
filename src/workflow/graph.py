@@ -15,7 +15,7 @@ import sys
 sys.path.insert(0, '/workspace')
 
 from config.settings import ModelConfig, settings
-from src.workflow.nodes import GeneratorNode, ReviewerNode, OptimizerNode, create_nodes
+from src.workflow.nodes import GeneratorNode, ReviewerNode, OptimizerNode, AnalyzerNode, create_nodes
 from src.input_handler.handlers import InputHandler, ProcessedInput, MultiInput
 from src.output_formatter.formatters import OutputFormatter, OutputFormat
 from src.rag.interface import RAGInterface
@@ -24,7 +24,7 @@ from src.rag.interface import RAGInterface
 class WorkflowState(TypedDict):
     """
     工作流的状态定义。
-    
+
     此状态在节点之间传递，每一步都会更新。
     """
     # 输入数据
@@ -32,14 +32,15 @@ class WorkflowState(TypedDict):
     additional_instructions: str
     images: list[dict]
     output_format: str
-    
+
     # 中间结果
+    analysis_result: str
     generated_test_cases: str
     review_feedback: str
-    
+
     # 最终输出
     final_test_cases: str
-    
+
     # 元数据
     errors: list[str]
     current_step: str
@@ -69,83 +70,140 @@ class WorkflowResult:
 class TestCaseWorkflow:
     """
     测试用例生成的主工作流类。
-    
-    协调三节点工作流：
+
+    协调工作流节点：
+    0. 分析器（可选）：分析需求复杂度
     1. 生成器：创建初始测试用例
     2. 评审员：评审并提供反馈
     3. 优化器：创建最终优化的测试用例
-    
+
     使用方式:
         workflow = TestCaseWorkflow()
         result = workflow.run("用户需求内容")
         print(result.final_test_cases)
     """
-    
+
     def __init__(
         self,
         generator_config: Optional[ModelConfig] = None,
         reviewer_config: Optional[ModelConfig] = None,
         optimizer_config: Optional[ModelConfig] = None,
+        analyzer_config: Optional[ModelConfig] = None,
         rag_interface: Optional[RAGInterface] = None,
-        output_format: str = "markdown"
+        output_format: str = "markdown",
+        enable_analyzer: Optional[bool] = None,
+        analyzer_complexity_threshold: Optional[int] = None
     ):
         """
         初始化工作流。
-        
+
         参数:
             generator_config: 生成器节点的配置
             reviewer_config: 评审员节点的配置
             optimizer_config: 优化器节点的配置
+            analyzer_config: 分析器节点的配置
             rag_interface: 可选的RAG接口用于知识检索
             output_format: 默认输出格式 (markdown/confluence)
+            enable_analyzer: 是否启用需求分析节点（None时使用settings配置）
+            analyzer_complexity_threshold: 分析器复杂度阈值（None时使用settings配置）
         """
         # 创建节点
-        self.generator, self.reviewer, self.optimizer = create_nodes(
+        self.generator, self.reviewer, self.optimizer, self.analyzer = create_nodes(
             generator_config=generator_config,
             reviewer_config=reviewer_config,
             optimizer_config=optimizer_config,
+            analyzer_config=analyzer_config,
             rag_interface=rag_interface
         )
-        
+
         self.input_handler = InputHandler()
         self.output_formatter = OutputFormatter()
         self.default_output_format = output_format
         self.rag_interface = rag_interface
-        
+
+        # 工作流配置
+        self.enable_analyzer = enable_analyzer if enable_analyzer is not None else settings.enable_analyzer
+        self.analyzer_complexity_threshold = analyzer_complexity_threshold if analyzer_complexity_threshold is not None else settings.analyzer_complexity_threshold
+
         # 构建工作流图
         self._graph = self._build_graph()
     
     def _build_graph(self) -> StateGraph:
         """
         构建LangGraph工作流。
-        
+
         返回:
             编译后的StateGraph
         """
         # 使用状态模式创建图
         workflow = StateGraph(WorkflowState)
-        
+
         # 添加节点
+        workflow.add_node("analyze", self._analyze_node)
         workflow.add_node("generate", self._generate_node)
         workflow.add_node("review", self._review_node)
         workflow.add_node("optimize", self._optimize_node)
-        
-        # 定义边（线性流程：生成 -> 评审 -> 优化 -> 结束）
-        workflow.set_entry_point("generate")
+
+        # 定义条件路由
+        workflow.set_entry_point("analyze")
+
+        # 分析节点后根据结果决定下一步
+        workflow.add_edge("analyze", "generate")
         workflow.add_edge("generate", "review")
         workflow.add_edge("review", "optimize")
         workflow.add_edge("optimize", END)
-        
+
         # 编译图
         return workflow.compile()
-    
+
+    def _analyze_node(self, state: WorkflowState) -> dict:
+        """
+        需求分析节点函数（条件性执行）。
+
+        参数:
+            state: 当前工作流状态
+
+        返回:
+            更新的状态字段
+        """
+        user_input = state["user_input"]
+
+        # 判断是否需要分析
+        if not self.enable_analyzer:
+            return {
+                "analysis_result": "",
+                "current_step": "analyze_skipped_disabled"
+            }
+
+        if not AnalyzerNode.should_analyze(user_input, self.analyzer_complexity_threshold):
+            return {
+                "analysis_result": "",
+                "current_step": "analyze_skipped_simple"
+            }
+
+        try:
+            analysis = self.analyzer.invoke(
+                user_input=user_input,
+                additional_instructions=state.get("additional_instructions", "")
+            )
+            return {
+                "analysis_result": analysis,
+                "current_step": "analyze_complete"
+            }
+        except Exception as e:
+            return {
+                "analysis_result": "",
+                "errors": state.get("errors", []) + [f"分析器错误: {str(e)}"],
+                "current_step": "analyze_error"
+            }
+
     def _generate_node(self, state: WorkflowState) -> dict:
         """
         生成器节点函数。
-        
+
         参数:
             state: 当前工作流状态
-            
+
         返回:
             更新的状态字段
         """
@@ -153,7 +211,8 @@ class TestCaseWorkflow:
             test_cases = self.generator.invoke(
                 user_input=state["user_input"],
                 additional_instructions=state.get("additional_instructions", ""),
-                images=state.get("images")
+                images=state.get("images"),
+                analysis_result=state.get("analysis_result", "")
             )
             return {
                 "generated_test_cases": test_cases,
@@ -304,6 +363,7 @@ class TestCaseWorkflow:
             "additional_instructions": additional_instructions,
             "images": images,
             "output_format": output_format or self.default_output_format,
+            "analysis_result": "",
             "generated_test_cases": "",
             "review_feedback": "",
             "final_test_cases": "",

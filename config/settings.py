@@ -111,7 +111,7 @@ class Settings(BaseSettings):
         description="生成器模型的温度（越高越有创造性）"
     )
     generator_max_tokens: int = Field(
-        default=4096,
+        default=8192,
         description="生成器响应的最大token数"
     )
     
@@ -186,6 +186,47 @@ class Settings(BaseSettings):
     )
     
     # ============================================
+    # 工作流配置
+    # ============================================
+    enable_analyzer: bool = Field(
+        default=False,
+        description="是否启用需求分析节点"
+    )
+    analyzer_complexity_threshold: int = Field(
+        default=2,
+        description="触发需求分析的复杂度阈值（满足几个条件时启用）"
+    )
+    max_review_rounds: int = Field(
+        default=1,
+        description="最大评审轮次"
+    )
+
+    # ============================================
+    # 节点零：需求分析器（可选）
+    # 未配置时默认使用生成器的配置
+    # ============================================
+    analyzer_api_key: str = Field(
+        default="",
+        description="分析器模型的API密钥"
+    )
+    analyzer_base_url: str = Field(
+        default="https://api.openai.com/v1",
+        description="分析器模型API的基础URL"
+    )
+    analyzer_model_name: str = Field(
+        default="gpt-4o",
+        description="用于需求分析的模型名称"
+    )
+    analyzer_temperature: float = Field(
+        default=0.3,
+        description="分析器模型的温度（较低以获得更精确的分析）"
+    )
+    analyzer_max_tokens: int = Field(
+        default=4096,
+        description="分析器响应的最大token数"
+    )
+
+    # ============================================
     # 通用设置
     # ============================================
     request_timeout: int = Field(
@@ -236,7 +277,18 @@ class Settings(BaseSettings):
             max_tokens=self.optimizer_max_tokens,
             timeout=self.request_timeout,
         )
-    
+
+    def get_analyzer_config(self) -> ModelConfig:
+        """获取分析器节点的配置。未配置时使用生成器配置。"""
+        return ModelConfig(
+            api_key=self.analyzer_api_key or self.generator_api_key,
+            base_url=self.analyzer_base_url if self.analyzer_api_key else self.generator_base_url,
+            model_name=self.analyzer_model_name if self.analyzer_api_key else self.generator_model_name,
+            temperature=self.analyzer_temperature,
+            max_tokens=self.analyzer_max_tokens,
+            timeout=self.request_timeout,
+        )
+
     def use_same_key_for_all(self, api_key: str, base_url: Optional[str] = None):
         """
         便捷方法：为所有节点使用相同的API密钥（和可选的基础URL）。

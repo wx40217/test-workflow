@@ -14,6 +14,35 @@ import os
 
 
 # ============================================
+# 节点零：需求分析器提示词（可选节点）
+# ============================================
+
+ANALYZER_SYSTEM_PROMPT = """你是一位资深的需求分析师，专注于将用户需求转化为结构化的测试范围定义。
+
+你的任务是分析用户输入，输出以下内容：
+1. **需求概述**：用一两句话总结核心需求
+2. **功能点拆解**：列出所有需要测试的功能点
+3. **测试范围边界**：明确哪些在测试范围内，哪些不在
+4. **测试维度建议**：建议覆盖的测试类型（功能、边界、异常、安全、性能等）
+5. **隐含需求**：识别用户未明说但应该考虑的需求点
+
+输出格式要求：
+- 使用简洁的列表格式
+- 每个功能点独立成行
+- 不要输出冗余的解释性文字
+
+{rag_context}"""
+
+ANALYZER_USER_PROMPT = """请分析以下需求，输出结构化的测试范围定义：
+
+---
+{user_input}
+---
+
+{additional_instructions}"""
+
+
+# ============================================
 # 节点一：生成器提示词
 # ============================================
 
@@ -106,21 +135,32 @@ OPTIMIZER_SYSTEM_PROMPT = """你是一位负责最终交付的测试用例设计
 3. 按照建议改进清晰度和结构
 4. 删除冗余的测试用例
 5. 确保整体格式一致
-6. 保持层级结构清晰
 
-输出格式要求：
-根据指定的output_format参数生成最终测试用例：
+输出格式要求（严格遵守）：
+1. 只输出测试用例内容，不要输出任何开场白、总结、备注或说明性文字
+2. 不要使用"前置条件：""测试步骤：""预期结果："等标签文字
+3. 使用纯嵌套列表结构，通过缩进层级来区分内容类型：
+   - 第一层：测试模块/分类（加粗）
+   - 第二层：具体测试点名称（加粗）
+   - 第三层：前置条件（如有）
+   - 第四层：测试步骤（按顺序编号 1. 2. 3.）
+   - 第五层：预期结果
 
-Confluence任务列表格式：
-- 使用项目符号和适当缩进
-- 每层级缩进一致
-- 格式："- [ ] 测试用例名称：描述"
+示例格式：
+- **登录功能验证**
+  - **使用正确邮箱密码登录**
+    - 用户已注册，账户状态正常
+      1. 进入登录页面
+      2. 输入有效邮箱地址
+      3. 输入正确密码
+      4. 点击登录按钮
+        - 登录成功，跳转至首页
 
-Markdown格式：
-- 使用无序列表，每层级缩进2或4个空格
-- 格式："- 测试用例名称：描述"
-
-输出内容应整洁、结构清晰、可直接使用。
+备注规则：
+- 允许在最末尾添加备注
+- 备注内容必须与测试用例的编写或执行严格相关
+- 例如：测试数据准备说明、环境配置要求、执行顺序建议、依赖关系说明等
+- 禁止输出与用例无关的总结性、评价性或说明性文字
 
 {rag_context}"""
 
@@ -207,7 +247,16 @@ class PromptTemplates:
         "OPTIMIZER_USER_PROMPT",
         OPTIMIZER_USER_PROMPT
     )
-    
+
+    ANALYZER_SYSTEM_PROMPT: str = os.getenv(
+        "ANALYZER_SYSTEM_PROMPT",
+        ANALYZER_SYSTEM_PROMPT
+    )
+    ANALYZER_USER_PROMPT: str = os.getenv(
+        "ANALYZER_USER_PROMPT",
+        ANALYZER_USER_PROMPT
+    )
+
     RAG_CONTEXT_TEMPLATE: str = os.getenv(
         "RAG_CONTEXT_TEMPLATE",
         RAG_CONTEXT_TEMPLATE
@@ -246,7 +295,40 @@ class PromptTemplates:
         )
         
         return system_prompt, user_prompt
-    
+
+    @classmethod
+    def get_analyzer_prompts(
+        cls,
+        user_input: str,
+        additional_instructions: str = "",
+        rag_context: str = ""
+    ) -> tuple[str, str]:
+        """
+        获取需求分析器节点的格式化提示词。
+
+        Args:
+            user_input: 用户输入（需求、文档等）
+            additional_instructions: 用户的额外指示
+            rag_context: RAG检索的上下文（如启用）
+
+        Returns:
+            (system_prompt, user_prompt) 元组
+        """
+        rag_section = cls.RAG_CONTEXT_TEMPLATE.format(
+            retrieved_documents=rag_context
+        ) if rag_context else cls.RAG_EMPTY_CONTEXT
+
+        system_prompt = cls.ANALYZER_SYSTEM_PROMPT.format(
+            rag_context=rag_section
+        )
+
+        user_prompt = cls.ANALYZER_USER_PROMPT.format(
+            user_input=user_input,
+            additional_instructions=additional_instructions if additional_instructions else "无额外说明"
+        )
+
+        return system_prompt, user_prompt
+
     @classmethod
     def get_reviewer_prompts(
         cls,
@@ -392,6 +474,8 @@ class PromptTemplates:
         import json
         
         config = {
+            "ANALYZER_SYSTEM_PROMPT": cls.ANALYZER_SYSTEM_PROMPT,
+            "ANALYZER_USER_PROMPT": cls.ANALYZER_USER_PROMPT,
             "GENERATOR_SYSTEM_PROMPT": cls.GENERATOR_SYSTEM_PROMPT,
             "GENERATOR_USER_PROMPT": cls.GENERATOR_USER_PROMPT,
             "REVIEWER_SYSTEM_PROMPT": cls.REVIEWER_SYSTEM_PROMPT,

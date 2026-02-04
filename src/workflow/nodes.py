@@ -123,51 +123,127 @@ class BaseNode:
 class GeneratorNode(BaseNode):
     """
     节点一：测试用例生成器
-    
+
     负责根据用户输入生成初始测试用例。
     使用配置的生成器模型（默认与优化器相同）。
     """
-    
+
     def __init__(
         self,
         config: Optional[ModelConfig] = None,
         rag_interface: Optional[RAGInterface] = None
     ):
         super().__init__(config or settings.get_generator_config(), rag_interface)
-    
+
     def invoke(
         self,
         user_input: str,
         additional_instructions: str = "",
-        images: Optional[list[dict]] = None
+        images: Optional[list[dict]] = None,
+        analysis_result: str = ""
     ) -> str:
         """
         根据用户输入生成测试用例。
-        
+
         参数:
             user_input: 用户输入（需求等）
             additional_instructions: 用户的额外指示
             images: 可选的图片（用于视觉模型）
-            
+            analysis_result: 需求分析结果（如有）
+
         返回:
             生成的测试用例字符串
         """
         # 获取RAG上下文（如果可用）
         rag_context = self._get_rag_context(user_input)
-        
+
+        # 如果有分析结果，合并到输入中
+        combined_input = user_input
+        if analysis_result:
+            combined_input = f"{user_input}\n\n## 需求分析结果：\n{analysis_result}"
+
         # 获取提示词
         system_prompt, user_prompt = PromptTemplates.get_generator_prompts(
-            user_input=user_input,
+            user_input=combined_input,
             additional_instructions=additional_instructions,
             rag_context=rag_context
         )
-        
+
         # 创建消息并调用LLM
         messages = self._create_messages(system_prompt, user_prompt, images)
         llm = self._get_llm()
         response = llm.invoke(messages)
-        
+
         return response.content
+
+
+class AnalyzerNode(BaseNode):
+    """
+    节点零：需求分析器（可选）
+
+    负责分析用户需求，输出结构化的测试范围定义。
+    仅在需求复杂度较高时启用。
+    """
+
+    def __init__(
+        self,
+        config: Optional[ModelConfig] = None,
+        rag_interface: Optional[RAGInterface] = None
+    ):
+        super().__init__(config or settings.get_generator_config(), rag_interface)
+
+    def invoke(
+        self,
+        user_input: str,
+        additional_instructions: str = ""
+    ) -> str:
+        """
+        分析用户需求。
+
+        参数:
+            user_input: 用户输入（需求等）
+            additional_instructions: 用户的额外指示
+
+        返回:
+            结构化的需求分析结果
+        """
+        # 获取RAG上下文（如果可用）
+        rag_context = self._get_rag_context(user_input)
+
+        # 获取提示词
+        system_prompt, user_prompt = PromptTemplates.get_analyzer_prompts(
+            user_input=user_input,
+            additional_instructions=additional_instructions,
+            rag_context=rag_context
+        )
+
+        # 创建消息并调用LLM
+        messages = self._create_messages(system_prompt, user_prompt)
+        llm = self._get_llm()
+        response = llm.invoke(messages)
+
+        return response.content
+
+    @staticmethod
+    def should_analyze(user_input: str, threshold: int = 2) -> bool:
+        """
+        判断是否需要进行需求分析。
+
+        参数:
+            user_input: 用户输入
+            threshold: 复杂度阈值（满足几个条件时触发分析）
+
+        返回:
+            是否需要分析
+        """
+        complexity_indicators = [
+            len(user_input) > 200,  # 需求描述较长
+            user_input.count("，") + user_input.count(",") > 5,  # 多个子需求
+            any(kw in user_input for kw in ["并且", "同时", "以及", "或者", "包括", "需要"]),  # 复合逻辑
+            "?" in user_input or "？" in user_input,  # 有不确定性
+            user_input.count("\n") > 3,  # 多行输入
+        ]
+        return sum(complexity_indicators) >= threshold
 
 
 class ReviewerNode(BaseNode):
@@ -276,22 +352,25 @@ def create_nodes(
     generator_config: Optional[ModelConfig] = None,
     reviewer_config: Optional[ModelConfig] = None,
     optimizer_config: Optional[ModelConfig] = None,
+    analyzer_config: Optional[ModelConfig] = None,
     rag_interface: Optional[RAGInterface] = None
-) -> tuple[GeneratorNode, ReviewerNode, OptimizerNode]:
+) -> tuple[GeneratorNode, ReviewerNode, OptimizerNode, AnalyzerNode]:
     """
-    创建所有三个节点的工厂函数。
-    
+    创建所有节点的工厂函数。
+
     参数:
         generator_config: 生成器节点的配置
         reviewer_config: 评审员节点的配置
         optimizer_config: 优化器节点的配置
+        analyzer_config: 分析器节点的配置
         rag_interface: 可选的共享RAG接口
-        
+
     返回:
-        (GeneratorNode, ReviewerNode, OptimizerNode) 元组
+        (GeneratorNode, ReviewerNode, OptimizerNode, AnalyzerNode) 元组
     """
     generator = GeneratorNode(generator_config, rag_interface)
     reviewer = ReviewerNode(reviewer_config, rag_interface)
     optimizer = OptimizerNode(optimizer_config, rag_interface)
-    
-    return generator, reviewer, optimizer
+    analyzer = AnalyzerNode(analyzer_config, rag_interface)
+
+    return generator, reviewer, optimizer, analyzer
