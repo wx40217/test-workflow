@@ -617,9 +617,7 @@ REQUEST_TIMEOUT=300
   - 从历史测试用例中学习风格和覆盖模式
   - 自动参考相似需求的测试用例
 
-## License
 
-MIT License
 
 增加超时时间：
 
