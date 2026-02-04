@@ -200,6 +200,15 @@ class Settings(BaseSettings):
         default=1,
         description="最大评审轮次"
     )
+    # 预留：大需求拆分功能
+    enable_requirement_split: bool = Field(
+        default=False,
+        description="是否启用大需求拆分（预留功能，暂未实现）"
+    )
+    requirement_split_threshold: int = Field(
+        default=1000,
+        description="触发需求拆分的字符数阈值（预留功能）"
+    )
 
     # ============================================
     # 节点零：需求分析器（可选）

@@ -182,12 +182,18 @@ class TestCaseWorkflow:
             }
 
         try:
-            analysis = self.analyzer.invoke(
+            output = self.analyzer.invoke(
                 user_input=user_input,
                 additional_instructions=state.get("additional_instructions", "")
             )
+
+            errors = state.get("errors", [])
+            if output.is_truncated:
+                errors = errors + [output.truncation_warning]
+
             return {
-                "analysis_result": analysis,
+                "analysis_result": output.content,
+                "errors": errors,
                 "current_step": "analyze_complete"
             }
         except Exception as e:
@@ -208,14 +214,20 @@ class TestCaseWorkflow:
             更新的状态字段
         """
         try:
-            test_cases = self.generator.invoke(
+            output = self.generator.invoke(
                 user_input=state["user_input"],
                 additional_instructions=state.get("additional_instructions", ""),
                 images=state.get("images"),
                 analysis_result=state.get("analysis_result", "")
             )
+
+            errors = state.get("errors", [])
+            if output.is_truncated:
+                errors = errors + [output.truncation_warning]
+
             return {
-                "generated_test_cases": test_cases,
+                "generated_test_cases": output.content,
+                "errors": errors,
                 "current_step": "generate_complete"
             }
         except Exception as e:
@@ -228,10 +240,10 @@ class TestCaseWorkflow:
     def _review_node(self, state: WorkflowState) -> dict:
         """
         评审员节点函数。
-        
+
         参数:
             state: 当前工作流状态
-            
+
         返回:
             更新的状态字段
         """
@@ -241,14 +253,20 @@ class TestCaseWorkflow:
                 "review_feedback": "由于生成失败而跳过",
                 "current_step": "review_skipped"
             }
-        
+
         try:
-            feedback = self.reviewer.invoke(
+            output = self.reviewer.invoke(
                 original_input=state["user_input"],
                 test_cases=state["generated_test_cases"]
             )
+
+            errors = state.get("errors", [])
+            if output.is_truncated:
+                errors = errors + [output.truncation_warning]
+
             return {
-                "review_feedback": feedback,
+                "review_feedback": output.content,
+                "errors": errors,
                 "current_step": "review_complete"
             }
         except Exception as e:
@@ -257,14 +275,14 @@ class TestCaseWorkflow:
                 "errors": state.get("errors", []) + [f"评审员错误: {str(e)}"],
                 "current_step": "review_error"
             }
-    
+
     def _optimize_node(self, state: WorkflowState) -> dict:
         """
         优化器节点函数。
-        
+
         参数:
             state: 当前工作流状态
-            
+
         返回:
             更新的状态字段
         """
@@ -274,23 +292,29 @@ class TestCaseWorkflow:
                 "final_test_cases": "",
                 "current_step": "optimize_skipped"
             }
-        
+
         # 如果评审失败但生成成功，使用生成的测试用例作为最终结果
         if not state.get("review_feedback"):
             return {
                 "final_test_cases": state["generated_test_cases"],
                 "current_step": "optimize_skipped_using_generated"
             }
-        
+
         try:
-            final_cases = self.optimizer.invoke(
+            output = self.optimizer.invoke(
                 original_input=state["user_input"],
                 initial_test_cases=state["generated_test_cases"],
                 review_feedback=state["review_feedback"],
                 output_format=state.get("output_format", "markdown")
             )
+
+            errors = state.get("errors", [])
+            if output.is_truncated:
+                errors = errors + [output.truncation_warning]
+
             return {
-                "final_test_cases": final_cases,
+                "final_test_cases": output.content,
+                "errors": errors,
                 "current_step": "optimize_complete"
             }
         except Exception as e:
@@ -404,59 +428,74 @@ class TestCaseWorkflow:
     ):
         """
         逐步运行工作流，每一步后产出结果。
-        
+
         这对于流式处理或进度跟踪很有用。
-        
+
         参数:
             input_source: 用户输入
             additional_instructions: 额外指示
             output_format: 输出格式
-            
+
         产出:
             (step_name, step_result) 元组
         """
         # 准备输入
         text_content, images = self._prepare_input(input_source, additional_instructions)
-        
+
+        # 收集截断警告
+        truncation_warnings = []
+
         # 步骤1：生成
         yield ("generating", None)
         try:
-            generated = self.generator.invoke(
+            output = self.generator.invoke(
                 user_input=text_content,
                 additional_instructions=additional_instructions,
                 images=images
             )
+            generated = output.content
+            if output.is_truncated:
+                truncation_warnings.append(output.truncation_warning)
             yield ("generated", generated)
         except Exception as e:
             yield ("generate_error", str(e))
             return
-        
+
         # 步骤2：评审
         yield ("reviewing", None)
         try:
-            feedback = self.reviewer.invoke(
+            output = self.reviewer.invoke(
                 original_input=text_content,
                 test_cases=generated
             )
+            feedback = output.content
+            if output.is_truncated:
+                truncation_warnings.append(output.truncation_warning)
             yield ("reviewed", feedback)
         except Exception as e:
             yield ("review_error", str(e))
             # 继续使用生成的测试用例
             feedback = ""
-        
+
         # 步骤3：优化
         yield ("optimizing", None)
         try:
             if feedback:
-                final = self.optimizer.invoke(
+                output = self.optimizer.invoke(
                     original_input=text_content,
                     initial_test_cases=generated,
                     review_feedback=feedback,
                     output_format=output_format or self.default_output_format
                 )
+                final = output.content
+                if output.is_truncated:
+                    truncation_warnings.append(output.truncation_warning)
             else:
                 final = generated
             yield ("completed", final)
+            # 如果有截断警告，额外yield一次
+            if truncation_warnings:
+                yield ("truncation_warnings", truncation_warnings)
         except Exception as e:
             yield ("optimize_error", str(e))
             yield ("completed_with_fallback", generated)
