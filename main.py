@@ -158,6 +158,7 @@ def generate_test_cases(
     additional_instructions: str = "",
     enable_rag: bool = False,
     rag_documents: list[str] = None,
+    stream_output: bool = False,
     verbose: bool = True,
     auto_save: bool = False
 ) -> WorkflowResult:
@@ -177,6 +178,7 @@ def generate_test_cases(
         additional_instructions: 生成的额外指示
         enable_rag: 是否启用RAG
         rag_documents: 要添加到RAG知识库的文档
+        stream_output: 是否将模型流式输出实时打印到控制台
         verbose: 是否打印进度信息（默认True）
         auto_save: 是否自动保存到outputs目录
 
@@ -240,6 +242,13 @@ def generate_test_cases(
         workflow.reviewer.rag_interface = rag_interface
         workflow.optimizer.rag_interface = rag_interface
 
+    # 可选：将各节点流式token实时打印到控制台
+    if stream_output:
+        workflow.analyzer.stream_to_console = True
+        workflow.generator.stream_to_console = True
+        workflow.reviewer.stream_to_console = True
+        workflow.optimizer.stream_to_console = True
+
     # 使用 step-by-step 运行以获取进度
     result = None
     output_path = ""
@@ -249,12 +258,17 @@ def generate_test_cases(
         additional_instructions=additional_instructions,
         output_format=output_format
     ):
-        if step == "generating":
-            # 先检查分析节点状态
-            if workflow.enable_analyzer:
-                progress.step("analyze", "running")
-            else:
-                progress.step("analyze", "skip", "未启用")
+        if step == "analyzing":
+            progress.step("analyze", "running")
+        elif step == "analyzed":
+            progress.step("analyze", "done")
+        elif step == "analyze_skipped_disabled":
+            progress.step("analyze", "skip", "未启用")
+        elif step == "analyze_skipped_simple":
+            progress.step("analyze", "skip", "需求简单，跳过")
+        elif step == "analyze_error":
+            progress.step("analyze", "error", step_result)
+        elif step == "generating":
             progress.step("generate", "running")
         elif step == "generated":
             progress.step("generate", "done")
@@ -500,6 +514,11 @@ def main():
         action="store_true",
         help="静默模式，不打印进度信息"
     )
+    parser.add_argument(
+        "--stream-output",
+        action="store_true",
+        help="将模型流式响应实时输出到控制台"
+    )
     
     # RAG选项
     parser.add_argument(
@@ -562,6 +581,7 @@ def main():
             additional_instructions=args.instructions,
             enable_rag=args.enable_rag,
             rag_documents=args.rag_documents,
+            stream_output=args.stream_output,
             verbose=not args.quiet if hasattr(args, 'quiet') else True,
             auto_save=args.auto_save
         )

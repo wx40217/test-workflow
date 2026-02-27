@@ -444,6 +444,28 @@ class TestCaseWorkflow:
 
         # 收集截断警告
         truncation_warnings = []
+        analysis_result = ""
+
+        # 步骤0：分析（条件执行）
+        if not self.enable_analyzer:
+            yield ("analyze_skipped_disabled", None)
+        elif not AnalyzerNode.should_analyze(text_content, self.analyzer_complexity_threshold):
+            yield ("analyze_skipped_simple", None)
+        else:
+            yield ("analyzing", None)
+            try:
+                output = self.analyzer.invoke(
+                    user_input=text_content,
+                    additional_instructions=additional_instructions
+                )
+                analysis_result = output.content
+                if output.is_truncated:
+                    truncation_warnings.append(output.truncation_warning)
+                yield ("analyzed", analysis_result)
+            except Exception as e:
+                yield ("analyze_error", str(e))
+                # 分析失败时继续后续流程
+                analysis_result = ""
 
         # 步骤1：生成
         yield ("generating", None)
@@ -451,7 +473,8 @@ class TestCaseWorkflow:
             output = self.generator.invoke(
                 user_input=text_content,
                 additional_instructions=additional_instructions,
-                images=images
+                images=images,
+                analysis_result=analysis_result
             )
             generated = output.content
             if output.is_truncated:

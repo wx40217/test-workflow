@@ -32,6 +32,46 @@ class NodeOutput:
 class TruncationDetector:
     """输出截断检测器，基于 API 返回的 finish_reason。"""
 
+    NODE_NAMES = {
+        "analyzer": "分析器",
+        "generator": "生成器",
+        "reviewer": "评审员",
+        "optimizer": "优化器"
+    }
+
+    @classmethod
+    def detect_from_finish_reason(
+        cls,
+        content: str,
+        finish_reason: Optional[str],
+        node_type: str = "unknown"
+    ) -> NodeOutput:
+        """
+        基于 finish_reason 构建节点输出。
+
+        参数:
+            content: 模型返回的完整文本
+            finish_reason: API 返回的结束原因
+            node_type: 节点类型（用于生成更具体的警告信息）
+
+        返回:
+            NodeOutput 对象
+        """
+        is_truncated = finish_reason == "length"
+        warning = ""
+        if is_truncated:
+            node_name = cls.NODE_NAMES.get(node_type, node_type)
+            warning = (
+                f"{node_name}输出被截断（达到 max_tokens 限制），"
+                f"建议增加 {node_type.upper()}_MAX_TOKENS 配置"
+            )
+
+        return NodeOutput(
+            content=content,
+            is_truncated=is_truncated,
+            truncation_warning=warning
+        )
+
     @classmethod
     def detect_from_response(cls, response: AIMessage, node_type: str = "unknown") -> NodeOutput:
         """
@@ -44,34 +84,11 @@ class TruncationDetector:
         返回:
             NodeOutput 对象
         """
-        content = response.content
-        is_truncated = False
-        warning = ""
-
-        # 从 response_metadata 中获取 finish_reason
-        # OpenAI API: response_metadata.get("finish_reason") == "length" 表示截断
+        content = response.content if isinstance(response.content, str) else str(response.content)
         finish_reason = None
         if hasattr(response, 'response_metadata') and response.response_metadata:
             finish_reason = response.response_metadata.get("finish_reason")
-
-        # finish_reason == "length" 表示达到 max_tokens 限制被截断
-        # finish_reason == "stop" 表示正常结束
-        if finish_reason == "length":
-            is_truncated = True
-            node_names = {
-                "analyzer": "分析器",
-                "generator": "生成器",
-                "reviewer": "评审员",
-                "optimizer": "优化器"
-            }
-            node_name = node_names.get(node_type, node_type)
-            warning = f"{node_name}输出被截断（达到 max_tokens 限制），建议增加 {node_type.upper()}_MAX_TOKENS 配置"
-
-        return NodeOutput(
-            content=content,
-            is_truncated=is_truncated,
-            truncation_warning=warning
-        )
+        return cls.detect_from_finish_reason(content, finish_reason, node_type)
 
 
 class BaseNode:
@@ -92,6 +109,7 @@ class BaseNode:
         self.config = config
         self.rag_interface = rag_interface
         self._llm = None
+        self.stream_to_console = False
 
     def _get_llm(self) -> ChatOpenAI:
         """获取或创建LLM实例。"""
@@ -106,6 +124,7 @@ class BaseNode:
                 temperature=self.config.temperature,
                 max_tokens=self.config.max_tokens,
                 timeout=self.config.timeout,
+                streaming=True,
             )
         return self._llm
 
@@ -168,6 +187,8 @@ class BaseNode:
         """
         调用LLM并检测截断。
 
+        所有节点统一使用流式接口，避免网关对长时间无返回请求的超时拦截。
+
         参数:
             messages: 消息列表
             node_type: 节点类型
@@ -176,8 +197,77 @@ class BaseNode:
             NodeOutput 对象（包含内容和截断信息）
         """
         llm = self._get_llm()
-        response = llm.invoke(messages)
-        return TruncationDetector.detect_from_response(response, node_type)
+        content_parts = []
+        finish_reason = None
+        has_stream_output = False
+
+        for chunk in llm.stream(messages):
+            chunk_text = self._extract_chunk_text(chunk)
+            if chunk_text:
+                content_parts.append(chunk_text)
+                if self.stream_to_console:
+                    if not has_stream_output:
+                        node_names = {
+                            "analyzer": "分析器",
+                            "generator": "生成器",
+                            "reviewer": "评审员",
+                            "optimizer": "优化器"
+                        }
+                        node_name = node_names.get(node_type, node_type)
+                        print(f"\n[{node_name}] 流式输出开始：", flush=True)
+                        has_stream_output = True
+                    print(chunk_text, end="", flush=True)
+
+            chunk_finish_reason = self._extract_finish_reason(chunk)
+            if chunk_finish_reason:
+                finish_reason = chunk_finish_reason
+
+        content = "".join(content_parts)
+        if self.stream_to_console and has_stream_output:
+            print("\n", flush=True)
+        return TruncationDetector.detect_from_finish_reason(content, finish_reason, node_type)
+
+    @staticmethod
+    def _extract_finish_reason(message: Any) -> Optional[str]:
+        """
+        从响应对象/分块对象提取 finish_reason。
+        """
+        if hasattr(message, "response_metadata") and message.response_metadata:
+            finish_reason = message.response_metadata.get("finish_reason")
+            if finish_reason:
+                return finish_reason
+
+        if hasattr(message, "additional_kwargs") and message.additional_kwargs:
+            finish_reason = message.additional_kwargs.get("finish_reason")
+            if finish_reason:
+                return finish_reason
+
+        return None
+
+    @staticmethod
+    def _extract_chunk_text(chunk: Any) -> str:
+        """
+        从流式分块中提取文本内容。
+
+        chunk.content 可能是字符串，也可能是多模态内容列表。
+        """
+        content = getattr(chunk, "content", "")
+        if isinstance(content, str):
+            return content
+
+        if isinstance(content, list):
+            text_parts: list[str] = []
+            for item in content:
+                if isinstance(item, str):
+                    text_parts.append(item)
+                    continue
+                if isinstance(item, dict):
+                    text = item.get("text")
+                    if isinstance(text, str):
+                        text_parts.append(text)
+            return "".join(text_parts)
+
+        return str(content) if content else ""
 
     def invoke(self, **kwargs) -> str:
         """
