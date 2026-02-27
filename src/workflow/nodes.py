@@ -121,6 +121,7 @@ class BaseNode:
                 api_key=self.config.api_key,
                 base_url=self.config.base_url,
                 model=self.config.model_name,
+                use_responses_api=self.config.use_responses_api,
                 temperature=self.config.temperature,
                 max_tokens=self.config.max_tokens,
                 timeout=self.config.timeout,

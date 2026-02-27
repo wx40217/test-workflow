@@ -43,6 +43,7 @@ class ModelConfig:
         api_key: 模型提供商的API密钥
         base_url: API端点的基础URL
         model_name: 使用的模型名称
+        use_responses_api: 是否使用 OpenAI Responses API
         temperature: 采样温度 (0.0-2.0)
         max_tokens: 响应的最大token数
         timeout: 请求超时时间（秒）
@@ -53,6 +54,7 @@ class ModelConfig:
         api_key: str,
         base_url: str,
         model_name: str,
+        use_responses_api: bool = True,
         temperature: float = 0.7,
         max_tokens: int = 4096,
         timeout: int = 120,
@@ -60,6 +62,7 @@ class ModelConfig:
         self.api_key = api_key
         self.base_url = base_url
         self.model_name = model_name
+        self.use_responses_api = use_responses_api
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.timeout = timeout
@@ -70,6 +73,7 @@ class ModelConfig:
             "api_key": self.api_key,
             "base_url": self.base_url,
             "model_name": self.model_name,
+            "use_responses_api": self.use_responses_api,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "timeout": self.timeout,
@@ -238,6 +242,10 @@ class Settings(BaseSettings):
     # ============================================
     # 通用设置
     # ============================================
+    use_responses_api: bool = Field(
+        default=True,
+        description="是否使用 OpenAI Responses API（false 时使用 Chat Completions API）"
+    )
     request_timeout: int = Field(
         default=120,
         description="默认请求超时时间（秒）"
@@ -260,6 +268,7 @@ class Settings(BaseSettings):
             api_key=self.generator_api_key,
             base_url=self.generator_base_url,
             model_name=self.generator_model_name,
+            use_responses_api=self.use_responses_api,
             temperature=self.generator_temperature,
             max_tokens=self.generator_max_tokens,
             timeout=self.request_timeout,
@@ -271,6 +280,7 @@ class Settings(BaseSettings):
             api_key=self.reviewer_api_key,
             base_url=self.reviewer_base_url,
             model_name=self.reviewer_model_name,
+            use_responses_api=self.use_responses_api,
             temperature=self.reviewer_temperature,
             max_tokens=self.reviewer_max_tokens,
             timeout=self.request_timeout,
@@ -282,6 +292,7 @@ class Settings(BaseSettings):
             api_key=self.optimizer_api_key,
             base_url=self.optimizer_base_url,
             model_name=self.optimizer_model_name,
+            use_responses_api=self.use_responses_api,
             temperature=self.optimizer_temperature,
             max_tokens=self.optimizer_max_tokens,
             timeout=self.request_timeout,
@@ -293,6 +304,7 @@ class Settings(BaseSettings):
             api_key=self.analyzer_api_key or self.generator_api_key,
             base_url=self.analyzer_base_url if self.analyzer_api_key else self.generator_base_url,
             model_name=self.analyzer_model_name if self.analyzer_api_key else self.generator_model_name,
+            use_responses_api=self.use_responses_api,
             temperature=self.analyzer_temperature,
             max_tokens=self.analyzer_max_tokens,
             timeout=self.request_timeout,
