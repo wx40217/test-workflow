@@ -6,8 +6,7 @@
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Optional, TypedDict, Annotated
-from operator import add
+from typing import Any, Optional, TypedDict
 
 from langgraph.graph import StateGraph, END
 
@@ -610,6 +609,23 @@ def create_workflow(
         max_tokens=settings.optimizer_max_tokens,
         timeout=settings.request_timeout
     )
+
+    analyzer_key = api_key or settings.analyzer_api_key or gen_key
+    analyzer_url = base_url or settings.analyzer_base_url
+    analyzer_model_name = settings.analyzer_model_name
+
+    # 当统一传入 api_key/base_url 时，分析器默认沿用统一配置
+    if api_key:
+        analyzer_model_name = generator_model or gen_model
+
+    analyzer_config = ModelConfig(
+        api_key=analyzer_key,
+        base_url=analyzer_url,
+        model_name=analyzer_model_name,
+        temperature=settings.analyzer_temperature,
+        max_tokens=settings.analyzer_max_tokens,
+        timeout=settings.request_timeout,
+    )
     
     # 如果启用则创建RAG接口
     rag_interface = None
@@ -625,6 +641,7 @@ def create_workflow(
         generator_config=generator_config,
         reviewer_config=reviewer_config,
         optimizer_config=optimizer_config,
+        analyzer_config=analyzer_config,
         rag_interface=rag_interface,
         output_format=output_format
     )
