@@ -29,11 +29,9 @@ from datetime import datetime
 # 添加工作区到路径
 sys.path.insert(0, '/workspace')
 
-from config.settings import settings, ModelConfig
+from config.settings import settings
 from config.prompts import PromptTemplates
-from src.workflow.graph import TestCaseWorkflow, create_workflow, WorkflowResult
-from src.input_handler.handlers import InputHandler
-from src.output_formatter.formatters import OutputFormatter, OutputFormat
+from src.workflow.graph import create_workflow, WorkflowResult
 from src.rag.interface import RAGInterface, RAGConfig
 
 
@@ -253,6 +251,8 @@ def generate_test_cases(
     result = None
     output_path = ""
 
+    truncation_warnings: list[str] = []
+
     for step, step_result in workflow.run_step_by_step(
         input_content,
         additional_instructions=additional_instructions,
@@ -301,6 +301,8 @@ def generate_test_cases(
                 review_feedback="",
                 errors=["优化失败，使用初始版本"]
             )
+        elif step == "truncation_warnings" and isinstance(step_result, list):
+            truncation_warnings.extend(step_result)
 
     # 如果没有通过step-by-step获取到结果，直接运行
     if result is None:
@@ -309,6 +311,9 @@ def generate_test_cases(
             additional_instructions=additional_instructions,
             output_format=output_format
         )
+
+    if truncation_warnings:
+        result.errors.extend(truncation_warnings)
 
     # 自动保存到outputs目录
     if auto_save and result.success and result.final_test_cases:
