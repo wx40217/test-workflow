@@ -252,6 +252,7 @@ def generate_test_cases(
     # 使用 step-by-step 运行以获取进度
     result = None
     output_path = ""
+    runtime_warnings: list[str] = []
 
     for step, step_result in workflow.run_step_by_step(
         input_content,
@@ -290,8 +291,10 @@ def generate_test_cases(
                 final_test_cases=step_result,
                 generated_test_cases="",
                 review_feedback="",
-                errors=[]
+                errors=list(runtime_warnings)
             )
+        elif step == "truncation_warnings":
+            runtime_warnings.extend(step_result if isinstance(step_result, list) else [str(step_result)])
         elif step == "completed_with_fallback":
             progress.step("optimize", "skip", "使用初始版本")
             result = WorkflowResult(
@@ -299,8 +302,16 @@ def generate_test_cases(
                 final_test_cases=step_result,
                 generated_test_cases=step_result,
                 review_feedback="",
-                errors=["优化失败，使用初始版本"]
+                errors=["优化失败，使用初始版本"] + list(runtime_warnings)
             )
+
+    # run_step_by_step 会在 completed 后再返回 warnings，这里统一并入最终结果
+    if result is not None and runtime_warnings:
+        seen = set(result.errors)
+        for warning in runtime_warnings:
+            if warning not in seen:
+                result.errors.append(warning)
+                seen.add(warning)
 
     # 如果没有通过step-by-step获取到结果，直接运行
     if result is None:

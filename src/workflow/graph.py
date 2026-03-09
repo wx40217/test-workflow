@@ -19,6 +19,7 @@ from src.workflow.nodes import GeneratorNode, ReviewerNode, OptimizerNode, Analy
 from src.input_handler.handlers import InputHandler, ProcessedInput, MultiInput
 from src.output_formatter.formatters import OutputFormatter, OutputFormat
 from src.rag.interface import RAGInterface
+from src.workflow.validators import validate_fe_be_structure
 
 
 class WorkflowState(TypedDict):
@@ -44,6 +45,7 @@ class WorkflowState(TypedDict):
     # 元数据
     errors: list[str]
     current_step: str
+    split_validation_passed: bool
 
 
 @dataclass
@@ -290,14 +292,16 @@ class TestCaseWorkflow:
         if not state.get("generated_test_cases"):
             return {
                 "final_test_cases": "",
-                "current_step": "optimize_skipped"
+                "current_step": "optimize_skipped",
+                "split_validation_passed": True
             }
 
         # 如果评审失败但生成成功，使用生成的测试用例作为最终结果
         if not state.get("review_feedback"):
             return {
                 "final_test_cases": state["generated_test_cases"],
-                "current_step": "optimize_skipped_using_generated"
+                "current_step": "optimize_skipped_using_generated",
+                "split_validation_passed": True
             }
 
         try:
@@ -312,18 +316,99 @@ class TestCaseWorkflow:
             if output.is_truncated:
                 errors = errors + [output.truncation_warning]
 
+            final_test_cases, split_issues, split_validation_passed = self._enforce_split_structure(
+                original_input=state["user_input"],
+                initial_test_cases=state["generated_test_cases"],
+                review_feedback=state["review_feedback"],
+                output_format=state.get("output_format", "markdown"),
+                candidate_content=output.content
+            )
+            if split_issues:
+                errors = errors + split_issues
+
             return {
-                "final_test_cases": output.content,
+                "final_test_cases": final_test_cases,
                 "errors": errors,
-                "current_step": "optimize_complete"
+                "current_step": "optimize_complete",
+                "split_validation_passed": split_validation_passed
             }
         except Exception as e:
             # 出错时回退到生成的测试用例
             return {
                 "final_test_cases": state["generated_test_cases"],
                 "errors": state.get("errors", []) + [f"优化器错误: {str(e)}"],
-                "current_step": "optimize_error"
+                "current_step": "optimize_error",
+                "split_validation_passed": False if self._is_frontend_backend_mode() else True
             }
+
+    def _is_frontend_backend_mode(self) -> bool:
+        """
+        当前是否启用前后端分离模式。
+        """
+        config = getattr(self.optimizer, "config", None)
+        mode = getattr(config, "test_case_split_mode", settings.test_case_split_mode)
+        return mode == "frontend_backend"
+
+    def _is_split_strict(self) -> bool:
+        """
+        前后端分离模式下是否严格校验。
+        """
+        config = getattr(self.optimizer, "config", None)
+        return bool(getattr(config, "test_case_split_strict", settings.test_case_split_strict))
+
+    def _enforce_split_structure(
+        self,
+        original_input: str,
+        initial_test_cases: str,
+        review_feedback: str,
+        output_format: str,
+        candidate_content: str
+    ) -> tuple[str, list[str], bool]:
+        """
+        对前后端分离结构进行校验并在严格模式下尝试自动修复一次。
+        """
+        if not self._is_frontend_backend_mode():
+            return candidate_content, [], True
+
+        validation = validate_fe_be_structure(candidate_content)
+        if validation.is_valid:
+            return candidate_content, [], True
+
+        issues = [
+            "前后端分离结构校验未通过：" + "；".join(validation.issues)
+        ]
+        if not self._is_split_strict():
+            return candidate_content, issues, False
+
+        # 严格模式：自动执行一次结构修复
+        repair_requirements = "\n".join([f"- {issue}" for issue in validation.issues]) if validation.issues else "- 未知结构问题"
+        repair_feedback = (
+            f"{review_feedback}\n\n"
+            "## 前后端分离结构修复要求（最高优先级）\n"
+            f"{validation.repair_hint}\n\n"
+            "## 当前结构问题\n"
+            f"{repair_requirements}\n\n"
+            "## 待修复测试用例\n"
+            f"{candidate_content}"
+        )
+
+        retry_output = self.optimizer.invoke(
+            original_input=original_input,
+            initial_test_cases=initial_test_cases,
+            review_feedback=repair_feedback,
+            output_format=output_format
+        )
+        retry_content = retry_output.content
+        if retry_output.is_truncated:
+            issues.append(retry_output.truncation_warning)
+
+        retry_validation = validate_fe_be_structure(retry_content)
+        if retry_validation.is_valid:
+            issues.append("已自动执行一次结构修复。")
+            return retry_content, issues, True
+
+        issues.append("自动结构修复后仍未通过校验：" + "；".join(retry_validation.issues))
+        return retry_content, issues, False
     
     def _prepare_input(
         self,
@@ -392,7 +477,8 @@ class TestCaseWorkflow:
             "review_feedback": "",
             "final_test_cases": "",
             "errors": [],
-            "current_step": "start"
+            "current_step": "start",
+            "split_validation_passed": True
         }
         
         # 运行工作流
@@ -410,7 +496,8 @@ class TestCaseWorkflow:
                 metadata={
                     "output_format": final_state.get("output_format"),
                     "current_step": final_state.get("current_step"),
-                    "has_images": len(images) > 0
+                    "has_images": len(images) > 0,
+                    "split_validation_passed": final_state.get("split_validation_passed", True)
                 }
             )
         except Exception as e:
@@ -442,8 +529,8 @@ class TestCaseWorkflow:
         # 准备输入
         text_content, images = self._prepare_input(input_source, additional_instructions)
 
-        # 收集截断警告
-        truncation_warnings = []
+        # 收集警告信息（截断/结构校验）
+        warnings = []
         analysis_result = ""
 
         # 步骤0：分析（条件执行）
@@ -460,7 +547,7 @@ class TestCaseWorkflow:
                 )
                 analysis_result = output.content
                 if output.is_truncated:
-                    truncation_warnings.append(output.truncation_warning)
+                    warnings.append(output.truncation_warning)
                 yield ("analyzed", analysis_result)
             except Exception as e:
                 yield ("analyze_error", str(e))
@@ -478,7 +565,7 @@ class TestCaseWorkflow:
             )
             generated = output.content
             if output.is_truncated:
-                truncation_warnings.append(output.truncation_warning)
+                warnings.append(output.truncation_warning)
             yield ("generated", generated)
         except Exception as e:
             yield ("generate_error", str(e))
@@ -493,7 +580,7 @@ class TestCaseWorkflow:
             )
             feedback = output.content
             if output.is_truncated:
-                truncation_warnings.append(output.truncation_warning)
+                warnings.append(output.truncation_warning)
             yield ("reviewed", feedback)
         except Exception as e:
             yield ("review_error", str(e))
@@ -512,13 +599,23 @@ class TestCaseWorkflow:
                 )
                 final = output.content
                 if output.is_truncated:
-                    truncation_warnings.append(output.truncation_warning)
+                    warnings.append(output.truncation_warning)
+
+                final, split_issues, _ = self._enforce_split_structure(
+                    original_input=text_content,
+                    initial_test_cases=generated,
+                    review_feedback=feedback,
+                    output_format=output_format or self.default_output_format,
+                    candidate_content=final
+                )
+                if split_issues:
+                    warnings.extend(split_issues)
             else:
                 final = generated
             yield ("completed", final)
             # 如果有截断警告，额外yield一次
-            if truncation_warnings:
-                yield ("truncation_warnings", truncation_warnings)
+            if warnings:
+                yield ("truncation_warnings", warnings)
         except Exception as e:
             yield ("optimize_error", str(e))
             yield ("completed_with_fallback", generated)
@@ -588,6 +685,9 @@ def create_workflow(
         api_key=gen_key,
         base_url=gen_url,
         model_name=gen_model,
+        use_responses_api=settings.use_responses_api,
+        test_case_split_mode=settings.test_case_split_mode,
+        test_case_split_strict=settings.test_case_split_strict,
         temperature=settings.generator_temperature,
         max_tokens=settings.generator_max_tokens,
         timeout=settings.request_timeout
@@ -597,6 +697,9 @@ def create_workflow(
         api_key=rev_key,
         base_url=rev_url,
         model_name=rev_model,
+        use_responses_api=settings.use_responses_api,
+        test_case_split_mode=settings.test_case_split_mode,
+        test_case_split_strict=settings.test_case_split_strict,
         temperature=settings.reviewer_temperature,
         max_tokens=settings.reviewer_max_tokens,
         timeout=settings.request_timeout
@@ -606,6 +709,9 @@ def create_workflow(
         api_key=opt_key,
         base_url=opt_url,
         model_name=opt_model,
+        use_responses_api=settings.use_responses_api,
+        test_case_split_mode=settings.test_case_split_mode,
+        test_case_split_strict=settings.test_case_split_strict,
         temperature=settings.optimizer_temperature,
         max_tokens=settings.optimizer_max_tokens,
         timeout=settings.request_timeout

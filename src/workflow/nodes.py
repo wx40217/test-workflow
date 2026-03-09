@@ -326,7 +326,8 @@ class GeneratorNode(BaseNode):
         system_prompt, user_prompt = PromptTemplates.get_generator_prompts(
             user_input=combined_input,
             additional_instructions=additional_instructions,
-            rag_context=rag_context
+            rag_context=rag_context,
+            split_mode=self.config.test_case_split_mode
         )
 
         # 创建消息并调用LLM
@@ -437,7 +438,8 @@ class ReviewerNode(BaseNode):
         system_prompt, user_prompt = PromptTemplates.get_reviewer_prompts(
             original_input=original_input,
             test_cases=test_cases,
-            rag_context=rag_context
+            rag_context=rag_context,
+            split_mode=self.config.test_case_split_mode
         )
 
         # 创建消息并调用LLM
@@ -488,7 +490,8 @@ class OptimizerNode(BaseNode):
             initial_test_cases=initial_test_cases,
             review_feedback=review_feedback,
             output_format=output_format,
-            rag_context=rag_context
+            rag_context=rag_context,
+            split_mode=self.config.test_case_split_mode
         )
 
         # 创建消息并调用LLM
