@@ -588,27 +588,33 @@ def create_workflow(
         api_key=gen_key,
         base_url=gen_url,
         model_name=gen_model,
+        use_responses_api=settings.use_responses_api,
         temperature=settings.generator_temperature,
         max_tokens=settings.generator_max_tokens,
-        timeout=settings.request_timeout
+        timeout=settings.request_timeout,
+        reasoning_effort=settings.generator_reasoning_effort,
     )
-    
+
     reviewer_config = ModelConfig(
         api_key=rev_key,
         base_url=rev_url,
         model_name=rev_model,
+        use_responses_api=settings.use_responses_api,
         temperature=settings.reviewer_temperature,
         max_tokens=settings.reviewer_max_tokens,
-        timeout=settings.request_timeout
+        timeout=settings.request_timeout,
+        reasoning_effort=settings.reviewer_reasoning_effort,
     )
-    
+
     optimizer_config = ModelConfig(
         api_key=opt_key,
         base_url=opt_url,
         model_name=opt_model,
+        use_responses_api=settings.use_responses_api,
         temperature=settings.optimizer_temperature,
         max_tokens=settings.optimizer_max_tokens,
-        timeout=settings.request_timeout
+        timeout=settings.request_timeout,
+        reasoning_effort=settings.optimizer_reasoning_effort,
     )
     
     # 如果启用则创建RAG接口

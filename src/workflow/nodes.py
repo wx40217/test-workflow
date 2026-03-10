@@ -117,16 +117,20 @@ class BaseNode:
             if self.config is None:
                 raise ValueError("需要模型配置")
 
-            self._llm = ChatOpenAI(
-                api_key=self.config.api_key,
-                base_url=self.config.base_url,
-                model=self.config.model_name,
-                use_responses_api=self.config.use_responses_api,
-                temperature=self.config.temperature,
-                max_tokens=self.config.max_tokens,
-                timeout=self.config.timeout,
-                streaming=True,
-            )
+            kwargs = {
+                "api_key": self.config.api_key,
+                "base_url": self.config.base_url,
+                "model": self.config.model_name,
+                "use_responses_api": self.config.use_responses_api,
+                "max_tokens": self.config.max_tokens,
+                "timeout": self.config.timeout,
+                "streaming": True,
+            }
+            if self.config.reasoning_effort:
+                kwargs["reasoning_effort"] = self.config.reasoning_effort
+            else:
+                kwargs["temperature"] = self.config.temperature
+            self._llm = ChatOpenAI(**kwargs)
         return self._llm
 
     def _get_rag_context(self, query: str) -> str:

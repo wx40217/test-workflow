@@ -58,6 +58,7 @@ class ModelConfig:
         temperature: float = 0.7,
         max_tokens: int = 4096,
         timeout: int = 120,
+        reasoning_effort: Optional[str] = None,
     ):
         self.api_key = api_key
         self.base_url = base_url
@@ -66,7 +67,8 @@ class ModelConfig:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.timeout = timeout
-    
+        self.reasoning_effort = reasoning_effort
+
     def to_dict(self) -> dict:
         """将配置转换为字典。"""
         return {
@@ -77,6 +79,7 @@ class ModelConfig:
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "timeout": self.timeout,
+            "reasoning_effort": self.reasoning_effort,
         }
 
 
@@ -118,7 +121,11 @@ class Settings(BaseSettings):
         default=8192,
         description="生成器响应的最大token数"
     )
-    
+    generator_reasoning_effort: Optional[str] = Field(
+        default=None,
+        description="生成器推理力度（仅 reasoning 模型生效，如 gpt-5.4, o1 系列）"
+    )
+
     # ============================================
     # 节点二：评审员（测试用例评审）
     # 使用更强大的思考模型
@@ -143,7 +150,11 @@ class Settings(BaseSettings):
         default=8192,
         description="评审员响应的最大token数"
     )
-    
+    reviewer_reasoning_effort: Optional[str] = Field(
+        default=None,
+        description="评审员推理力度（仅 reasoning 模型生效，如 gpt-5.4, o1 系列）"
+    )
+
     # ============================================
     # 节点三：优化器（测试用例优化）
     # 与生成器使用相同模型
@@ -168,7 +179,11 @@ class Settings(BaseSettings):
         default=8192,
         description="优化器响应的最大token数"
     )
-    
+    optimizer_reasoning_effort: Optional[str] = Field(
+        default=None,
+        description="优化器推理力度（仅 reasoning 模型生效，如 gpt-5.4, o1 系列）"
+    )
+
     # ============================================
     # RAG配置（用于未来扩展）
     # ============================================
@@ -238,6 +253,10 @@ class Settings(BaseSettings):
         default=4096,
         description="分析器响应的最大token数"
     )
+    analyzer_reasoning_effort: Optional[str] = Field(
+        default=None,
+        description="分析器推理力度（仅 reasoning 模型生效，如 gpt-5.4, o1 系列）"
+    )
 
     # ============================================
     # 通用设置
@@ -272,6 +291,7 @@ class Settings(BaseSettings):
             temperature=self.generator_temperature,
             max_tokens=self.generator_max_tokens,
             timeout=self.request_timeout,
+            reasoning_effort=self.generator_reasoning_effort,
         )
     
     def get_reviewer_config(self) -> ModelConfig:
@@ -284,6 +304,7 @@ class Settings(BaseSettings):
             temperature=self.reviewer_temperature,
             max_tokens=self.reviewer_max_tokens,
             timeout=self.request_timeout,
+            reasoning_effort=self.reviewer_reasoning_effort,
         )
     
     def get_optimizer_config(self) -> ModelConfig:
@@ -296,6 +317,7 @@ class Settings(BaseSettings):
             temperature=self.optimizer_temperature,
             max_tokens=self.optimizer_max_tokens,
             timeout=self.request_timeout,
+            reasoning_effort=self.optimizer_reasoning_effort,
         )
 
     def get_analyzer_config(self) -> ModelConfig:
@@ -308,6 +330,7 @@ class Settings(BaseSettings):
             temperature=self.analyzer_temperature,
             max_tokens=self.analyzer_max_tokens,
             timeout=self.request_timeout,
+            reasoning_effort=self.analyzer_reasoning_effort,
         )
 
     def use_same_key_for_all(self, api_key: str, base_url: Optional[str] = None):
