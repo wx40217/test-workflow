@@ -321,6 +321,8 @@ result = generate_test_cases(
 | `OPTIMIZER_MODEL_NAME` | 优化器使用的模型 | gpt-4o |
 | `OPTIMIZER_TEMPERATURE` | 优化器采样温度 | 0.5 |
 | `OPTIMIZER_MAX_TOKENS` | 优化器最大 token 数 | 8192 |
+| `TEST_CASE_SPLIT_MODE` | 用例分离模式：`mixed` 或 `frontend_backend` | mixed |
+| `TEST_CASE_SPLIT_STRICT` | 分离模式下是否严格校验并自动修复结构 | true |
 | `USE_RESPONSES_API` | 是否使用 OpenAI Responses API（false 时使用 Chat Completions） | true |
 | `REQUEST_TIMEOUT` | 请求超时时间（秒） | 120 |
 | `RAG_ENABLED` | 是否启用 RAG | false |
