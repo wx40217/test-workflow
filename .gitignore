@@ -213,3 +213,6 @@ inputs/*
 # 模板目录中的用户文件（保留 .gitkeep）
 templates/*
 !templates/.gitkeep
+
+# Claude Code
+.claude/
