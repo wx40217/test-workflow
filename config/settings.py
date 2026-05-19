@@ -227,9 +227,17 @@ class Settings(BaseSettings):
         default=1,
         description="最大评审轮次"
     )
+    quality_threshold: float = Field(
+        default=0.75,
+        description="quality-graph 模式的质量通过阈值"
+    )
+    show_agent_trace: bool = Field(
+        default=False,
+        description="是否在详细输出中展示质量闭环 trace"
+    )
     agent_mode: str = Field(
         default="workflow",
-        description="Agent执行模式：workflow（默认线性工作流）或 react（工具调用Agent）"
+        description="Agent执行模式：workflow（默认线性工作流）、react（工具调用Agent）或 quality-graph（质量闭环状态图）"
     )
     max_agent_steps: int = Field(
         default=10,

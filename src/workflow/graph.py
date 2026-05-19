@@ -96,7 +96,9 @@ class TestCaseWorkflow:
         enable_analyzer: Optional[bool] = None,
         analyzer_complexity_threshold: Optional[int] = None,
         agent_mode: Optional[str] = None,
-        max_agent_steps: Optional[int] = None
+        max_agent_steps: Optional[int] = None,
+        max_review_rounds: Optional[int] = None,
+        quality_threshold: Optional[float] = None
     ):
         """
         初始化工作流。
@@ -110,7 +112,7 @@ class TestCaseWorkflow:
             output_format: 默认输出格式 (markdown/confluence)
             enable_analyzer: 是否启用需求分析节点（None时使用settings配置）
             analyzer_complexity_threshold: 分析器复杂度阈值（None时使用settings配置）
-            agent_mode: 执行模式，workflow（默认）或 react
+            agent_mode: 执行模式，workflow（默认）、react 或 quality-graph
             max_agent_steps: ReAct Agent最大工具调用步数
         """
         # 创建节点
@@ -132,8 +134,10 @@ class TestCaseWorkflow:
         self.analyzer_complexity_threshold = analyzer_complexity_threshold if analyzer_complexity_threshold is not None else settings.analyzer_complexity_threshold
         self.agent_mode = agent_mode or settings.agent_mode
         self.max_agent_steps = max_agent_steps if max_agent_steps is not None else settings.max_agent_steps
-        if self.agent_mode not in {"workflow", "react"}:
-            raise ValueError("agent_mode 必须是 workflow 或 react")
+        self.max_review_rounds = max_review_rounds if max_review_rounds is not None else settings.max_review_rounds
+        self.quality_threshold = quality_threshold if quality_threshold is not None else settings.quality_threshold
+        if self.agent_mode not in {"workflow", "react", "quality-graph"}:
+            raise ValueError("agent_mode 必须是 workflow、react 或 quality-graph")
         self.detailed = False
 
         # 构建工作流图
@@ -512,6 +516,66 @@ class TestCaseWorkflow:
                         "has_images": len(images) > 0,
                     }
                 )
+
+        if self.agent_mode == "quality-graph":
+            from src.workflow.quality_graph import QualityGraphWorkflow
+
+            try:
+                agent = QualityGraphWorkflow(
+                    self,
+                    max_review_rounds=self.max_review_rounds,
+                    quality_threshold=self.quality_threshold,
+                )
+                final_state = agent.run(
+                    user_input=text_content,
+                    additional_instructions=additional_instructions,
+                    images=images,
+                    output_format=output_format or self.default_output_format,
+                )
+                final_test_cases = final_state.get("final_test_cases", "")
+                quality_report = final_state.get("quality_report", {})
+                validation_reports = final_state.get("validation_reports", [])
+                validation_passed = bool(final_state.get("validation_passed", False))
+                warnings = final_state.get("warnings", [])
+                errors = final_state.get("errors", [])
+                success = bool(final_test_cases)
+                return WorkflowResult(
+                    success=success,
+                    final_test_cases=final_test_cases,
+                    generated_test_cases=final_state.get("draft_test_cases", ""),
+                    review_feedback=final_state.get("review_feedback", ""),
+                    errors=errors + warnings,
+                    metadata={
+                        "agent_mode": "quality-graph",
+                        "output_format": final_state.get("output_format"),
+                        "has_images": len(images) > 0,
+                        "review_rounds": final_state.get("review_round", 0),
+                        "quality_passed": bool(quality_report.get("passed", False)),
+                        "quality_score": quality_report.get("score", 0.0),
+                        "quality_report": quality_report,
+                        "validation_reports": validation_reports,
+                        "validation_passed": validation_passed,
+                        "agent_trace": final_state.get("agent_trace", []),
+                        "decision": final_state.get("decision", {}),
+                        "next_required_information": final_state.get("next_required_information", []),
+                        "best_score": final_state.get("best_score", 0.0),
+                    },
+                )
+            except Exception as e:
+                return WorkflowResult(
+                    success=False,
+                    final_test_cases="",
+                    errors=[f"质量闭环工作流执行错误: {str(e)}"],
+                    metadata={
+                        "agent_mode": "quality-graph",
+                        "review_rounds": 0,
+                        "quality_passed": False,
+                        "quality_score": 0.0,
+                        "validation_reports": [],
+                        "validation_passed": False,
+                        "agent_trace": [],
+                    },
+                )
         
         # 初始化状态
         initial_state: WorkflowState = {
@@ -733,7 +797,9 @@ def create_workflow(
     enable_rag: bool = False,
     rag_config: Optional[dict] = None,
     agent_mode: Optional[str] = None,
-    max_agent_steps: Optional[int] = None
+    max_agent_steps: Optional[int] = None,
+    max_review_rounds: Optional[int] = None,
+    quality_threshold: Optional[float] = None
 ) -> TestCaseWorkflow:
     """
     创建自定义配置工作流的工厂函数。
@@ -749,7 +815,7 @@ def create_workflow(
         output_format: 默认输出格式
         enable_rag: 是否启用RAG
         rag_config: RAG配置字典
-        agent_mode: 执行模式，workflow（默认）或 react
+        agent_mode: 执行模式，workflow（默认）、react 或 quality-graph
         max_agent_steps: ReAct Agent最大工具调用步数
         
     返回:
@@ -825,5 +891,7 @@ def create_workflow(
         rag_interface=rag_interface,
         output_format=output_format,
         agent_mode=agent_mode,
-        max_agent_steps=max_agent_steps
+        max_agent_steps=max_agent_steps,
+        max_review_rounds=max_review_rounds,
+        quality_threshold=quality_threshold
     )

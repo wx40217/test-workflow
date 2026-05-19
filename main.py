@@ -165,6 +165,25 @@ def print_react_details(result: WorkflowResult) -> None:
             print(_indent_preview(str(step.get("content_preview")), "      "))
 
 
+def print_quality_graph_details(result: WorkflowResult) -> None:
+    """打印 quality-graph 模式的质量闭环摘要。"""
+    metadata = result.metadata or {}
+    print(f"\n{'='*60}")
+    print("[详细] Quality Graph Trace")
+    print(f"{'='*60}")
+    print(f"  agent_mode: {metadata.get('agent_mode')}")
+    print(f"  review_rounds: {metadata.get('review_rounds')}")
+    print(f"  quality_passed: {metadata.get('quality_passed')}")
+    print(f"  quality_score: {metadata.get('quality_score')}")
+    print(f"  validation_passed: {metadata.get('validation_passed')}")
+    decision = metadata.get("decision") or {}
+    if decision:
+        print(f"  decision: {decision.get('route')} - {decision.get('reason')}")
+
+    for item in metadata.get("agent_trace") or []:
+        print(f"  - {item.get('node')}: {item.get('detail')} (round={item.get('review_round')})")
+
+
 def _indent_preview(text: str, prefix: str) -> str:
     lines = text.splitlines() or [""]
     return "\n".join(f"{prefix}{line}" for line in lines)
@@ -204,7 +223,10 @@ def generate_test_cases(
     auto_save: bool = False,
     detailed: bool = False,
     agent_mode: str = "workflow",
-    max_agent_steps: int = None
+    max_agent_steps: int = None,
+    max_review_rounds: int = None,
+    quality_threshold: float = None,
+    show_agent_trace: bool = None
 ) -> WorkflowResult:
     """
     从输入内容生成测试用例。
@@ -226,8 +248,11 @@ def generate_test_cases(
         verbose: 是否打印进度信息（默认True）
         auto_save: 是否自动保存到outputs目录
         detailed: 是否输出各节点的详细输入输出内容
-        agent_mode: 执行模式，workflow（默认）或 react
+        agent_mode: 执行模式，workflow（默认）、react 或 quality-graph
         max_agent_steps: ReAct Agent最大工具调用步数
+        max_review_rounds: quality-graph 最大评审/修订轮次
+        quality_threshold: quality-graph 质量通过阈值
+        show_agent_trace: 是否输出 Agent trace（默认使用 settings.show_agent_trace）
 
     返回:
         包含最终测试用例的WorkflowResult
@@ -242,6 +267,7 @@ def generate_test_cases(
     """
     progress = ProgressPrinter(enabled=verbose)
     progress.start()
+    show_agent_trace = settings.show_agent_trace if show_agent_trace is None else show_agent_trace
 
     # 使用提供的API密钥或回退到设置
     api_key = api_key or settings.generator_api_key or os.getenv("OPENAI_API_KEY")
@@ -287,7 +313,9 @@ def generate_test_cases(
         output_format=output_format,
         enable_rag=enable_rag,
         agent_mode=agent_mode,
-        max_agent_steps=max_agent_steps
+        max_agent_steps=max_agent_steps,
+        max_review_rounds=max_review_rounds,
+        quality_threshold=quality_threshold
     )
 
     # 如果创建了则附加RAG接口
@@ -313,16 +341,20 @@ def generate_test_cases(
     runtime_warnings: list[str] = []
     split_validation_passed = True
 
-    if agent_mode == "react":
-        progress.step("react", "running", "正在运行 ReAct Agent...")
+    if agent_mode in {"react", "quality-graph"}:
+        step_name = "quality-graph" if agent_mode == "quality-graph" else "react"
+        progress.step(step_name, "running", f"正在运行 {step_name}...")
         result = workflow.run(
             input_content,
             additional_instructions=additional_instructions,
             output_format=output_format
         )
-        progress.step("react", "done" if result.success else "error", "完成" if result.success else "; ".join(result.errors[:2]))
-        if detailed and verbose:
-            print_react_details(result)
+        progress.step(step_name, "done" if result.success else "error", "完成" if result.success else "; ".join(result.errors[:2]))
+        if verbose and (detailed or show_agent_trace):
+            if agent_mode == "react":
+                print_react_details(result)
+            else:
+                print_quality_graph_details(result)
     else:
         # 使用 step-by-step 运行以获取进度
         for step, step_result in workflow.run_step_by_step(
@@ -641,16 +673,34 @@ def main():
         help="详细模式，输出各节点的输入输出内容"
     )
     parser.add_argument(
+        "--show-agent-trace",
+        action="store_true",
+        default=settings.show_agent_trace,
+        help="显示 Agent trace 摘要（默认不显示；quiet 模式仍会压制输出）"
+    )
+    parser.add_argument(
         "--agent-mode",
-        choices=["workflow", "react"],
+        choices=["workflow", "react", "quality-graph"],
         default=settings.agent_mode,
-        help="执行模式：workflow（默认线性工作流）或 react（工具调用Agent）"
+        help="执行模式：workflow（默认线性工作流）、react（工具调用Agent）或 quality-graph（质量闭环状态图）"
     )
     parser.add_argument(
         "--max-agent-steps",
         type=int,
         default=settings.max_agent_steps,
         help="ReAct Agent最大工具调用步数"
+    )
+    parser.add_argument(
+        "--max-review-rounds",
+        type=int,
+        default=settings.max_review_rounds,
+        help="quality-graph 最大评审/修订轮次"
+    )
+    parser.add_argument(
+        "--quality-threshold",
+        type=float,
+        default=settings.quality_threshold,
+        help="quality-graph 质量通过阈值"
     )
     
     # RAG选项
@@ -719,7 +769,10 @@ def main():
             auto_save=args.auto_save,
             detailed=args.detailed,
             agent_mode=args.agent_mode,
-            max_agent_steps=args.max_agent_steps
+            max_agent_steps=args.max_agent_steps,
+            max_review_rounds=args.max_review_rounds,
+            quality_threshold=args.quality_threshold,
+            show_agent_trace=args.show_agent_trace
         )
         
         # 输出结果
