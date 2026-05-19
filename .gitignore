@@ -216,3 +216,6 @@ templates/*
 
 # Claude Code
 .claude/
+
+# 本地规划文档（Codex /goal 草案等）
+docs/

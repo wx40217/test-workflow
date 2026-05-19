@@ -94,7 +94,9 @@ class TestCaseWorkflow:
         rag_interface: Optional[RAGInterface] = None,
         output_format: str = "markdown",
         enable_analyzer: Optional[bool] = None,
-        analyzer_complexity_threshold: Optional[int] = None
+        analyzer_complexity_threshold: Optional[int] = None,
+        agent_mode: Optional[str] = None,
+        max_agent_steps: Optional[int] = None
     ):
         """
         初始化工作流。
@@ -108,6 +110,8 @@ class TestCaseWorkflow:
             output_format: 默认输出格式 (markdown/confluence)
             enable_analyzer: 是否启用需求分析节点（None时使用settings配置）
             analyzer_complexity_threshold: 分析器复杂度阈值（None时使用settings配置）
+            agent_mode: 执行模式，workflow（默认）或 react
+            max_agent_steps: ReAct Agent最大工具调用步数
         """
         # 创建节点
         self.generator, self.reviewer, self.optimizer, self.analyzer = create_nodes(
@@ -126,6 +130,10 @@ class TestCaseWorkflow:
         # 工作流配置
         self.enable_analyzer = enable_analyzer if enable_analyzer is not None else settings.enable_analyzer
         self.analyzer_complexity_threshold = analyzer_complexity_threshold if analyzer_complexity_threshold is not None else settings.analyzer_complexity_threshold
+        self.agent_mode = agent_mode or settings.agent_mode
+        self.max_agent_steps = max_agent_steps if max_agent_steps is not None else settings.max_agent_steps
+        if self.agent_mode not in {"workflow", "react"}:
+            raise ValueError("agent_mode 必须是 workflow 或 react")
         self.detailed = False
 
         # 构建工作流图
@@ -466,6 +474,44 @@ class TestCaseWorkflow:
         """
         # 准备输入
         text_content, images = self._prepare_input(input_source, additional_instructions)
+
+        if self.agent_mode == "react":
+            from src.workflow.react_agent import ReactAgentDependencyError, TestCaseReactAgent
+
+            try:
+                agent = TestCaseReactAgent(self, max_steps=self.max_agent_steps)
+                react_result = agent.run(
+                    user_input=text_content,
+                    additional_instructions=additional_instructions,
+                    images=images,
+                    output_format=output_format or self.default_output_format
+                )
+                return WorkflowResult(
+                    success=react_result.success,
+                    final_test_cases=react_result.final_test_cases,
+                    generated_test_cases=react_result.generated_test_cases,
+                    review_feedback=react_result.review_feedback,
+                    errors=react_result.errors,
+                    metadata={
+                        **react_result.metadata,
+                        "has_images": len(images) > 0,
+                    }
+                )
+            except ReactAgentDependencyError as e:
+                return WorkflowResult(
+                    success=False,
+                    final_test_cases="",
+                    errors=[str(e)],
+                    metadata={
+                        "agent_mode": "react",
+                        "agent_steps": [],
+                        "tools_used": [],
+                        "validation_passed": False,
+                        "output_format": output_format or self.default_output_format,
+                        "max_agent_steps": self.max_agent_steps,
+                        "has_images": len(images) > 0,
+                    }
+                )
         
         # 初始化状态
         initial_state: WorkflowState = {
@@ -495,10 +541,14 @@ class TestCaseWorkflow:
                 review_feedback=final_state.get("review_feedback", ""),
                 errors=final_state.get("errors", []),
                 metadata={
+                    "agent_mode": "workflow",
                     "output_format": final_state.get("output_format"),
                     "current_step": final_state.get("current_step"),
                     "has_images": len(images) > 0,
-                    "split_validation_passed": final_state.get("split_validation_passed", True)
+                    "split_validation_passed": final_state.get("split_validation_passed", True),
+                    "validation_passed": final_state.get("split_validation_passed", True),
+                    "agent_steps": [],
+                    "tools_used": []
                 }
             )
         except Exception as e:
@@ -636,7 +686,17 @@ class TestCaseWorkflow:
                     yield ("detail_optimizer_output", final)
             else:
                 final = generated
+            final, split_issues, split_validation_passed = self._enforce_split_structure(
+                original_input=text_content,
+                initial_test_cases=generated,
+                review_feedback=feedback,
+                output_format=output_format or self.default_output_format,
+                candidate_content=final
+            )
+            if split_issues:
+                warnings.extend(split_issues)
             yield ("completed", final)
+            yield ("split_validation_passed", split_validation_passed)
             # 如果有截断警告，额外yield一次
             if warnings:
                 yield ("truncation_warnings", warnings)
@@ -671,7 +731,9 @@ def create_workflow(
     optimizer_model: Optional[str] = None,
     output_format: str = "markdown",
     enable_rag: bool = False,
-    rag_config: Optional[dict] = None
+    rag_config: Optional[dict] = None,
+    agent_mode: Optional[str] = None,
+    max_agent_steps: Optional[int] = None
 ) -> TestCaseWorkflow:
     """
     创建自定义配置工作流的工厂函数。
@@ -687,6 +749,8 @@ def create_workflow(
         output_format: 默认输出格式
         enable_rag: 是否启用RAG
         rag_config: RAG配置字典
+        agent_mode: 执行模式，workflow（默认）或 react
+        max_agent_steps: ReAct Agent最大工具调用步数
         
     返回:
         配置好的TestCaseWorkflow实例
@@ -759,5 +823,7 @@ def create_workflow(
         reviewer_config=reviewer_config,
         optimizer_config=optimizer_config,
         rag_interface=rag_interface,
-        output_format=output_format
+        output_format=output_format,
+        agent_mode=agent_mode,
+        max_agent_steps=max_agent_steps
     )

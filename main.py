@@ -130,6 +130,46 @@ def generate_output_filename(input_content: str) -> str:
     return f"{timestamp}_{clean_name}.md"
 
 
+def print_react_details(result: WorkflowResult) -> None:
+    """打印 ReAct 模式的工具调用轨迹摘要。"""
+    metadata = result.metadata or {}
+    print(f"\n{'='*60}")
+    print("[详细] ReAct Agent Trace")
+    print(f"{'='*60}")
+    print(f"  agent_mode: {metadata.get('agent_mode')}")
+    print(f"  validation_passed: {metadata.get('validation_passed')}")
+    print(f"  reached_stop_condition: {metadata.get('reached_stop_condition')}")
+    tools_used = metadata.get("tools_used") or []
+    print(f"  tools_used: {' -> '.join(tools_used) if tools_used else '(无)'}")
+
+    steps = metadata.get("agent_steps") or []
+    if not steps:
+        print("  agent_steps: (无)")
+        return
+
+    for step in steps:
+        step_no = step.get("step", "?")
+        step_type = step.get("type", "?")
+        print(f"\n  [step {step_no}] {step_type}")
+        if step.get("tool"):
+            print(f"    tool: {step.get('tool')}")
+        if step.get("args"):
+            print(f"    args: {step.get('args')}")
+        if "stop" in step:
+            print(f"    stop: {step.get('stop')}")
+        if step.get("observation_preview"):
+            print("    observation_preview:")
+            print(_indent_preview(str(step.get("observation_preview")), "      "))
+        if step.get("content_preview"):
+            print("    content_preview:")
+            print(_indent_preview(str(step.get("content_preview")), "      "))
+
+
+def _indent_preview(text: str, prefix: str) -> str:
+    lines = text.splitlines() or [""]
+    return "\n".join(f"{prefix}{line}" for line in lines)
+
+
 def load_prompts_config(config_file: str = None) -> None:
     """
     加载提示词配置文件。
@@ -162,7 +202,9 @@ def generate_test_cases(
     stream_output: bool = False,
     verbose: bool = True,
     auto_save: bool = False,
-    detailed: bool = False
+    detailed: bool = False,
+    agent_mode: str = "workflow",
+    max_agent_steps: int = None
 ) -> WorkflowResult:
     """
     从输入内容生成测试用例。
@@ -184,6 +226,8 @@ def generate_test_cases(
         verbose: 是否打印进度信息（默认True）
         auto_save: 是否自动保存到outputs目录
         detailed: 是否输出各节点的详细输入输出内容
+        agent_mode: 执行模式，workflow（默认）或 react
+        max_agent_steps: ReAct Agent最大工具调用步数
 
     返回:
         包含最终测试用例的WorkflowResult
@@ -241,7 +285,9 @@ def generate_test_cases(
         reviewer_model=reviewer_model,
         optimizer_model=optimizer_model,
         output_format=output_format,
-        enable_rag=enable_rag
+        enable_rag=enable_rag,
+        agent_mode=agent_mode,
+        max_agent_steps=max_agent_steps
     )
 
     # 如果创建了则附加RAG接口
@@ -262,90 +308,123 @@ def generate_test_cases(
         workflow.reviewer.stream_to_console = True
         workflow.optimizer.stream_to_console = True
 
-    # 使用 step-by-step 运行以获取进度
     result = None
     output_path = ""
     runtime_warnings: list[str] = []
+    split_validation_passed = True
 
-    for step, step_result in workflow.run_step_by_step(
-        input_content,
-        additional_instructions=additional_instructions,
-        output_format=output_format
-    ):
-        if step == "analyzing":
-            progress.step("analyze", "running")
-        elif step == "analyzed":
-            progress.step("analyze", "done")
-        elif step == "analyze_skipped_disabled":
-            progress.step("analyze", "skip", "未启用")
-        elif step == "analyze_skipped_simple":
-            progress.step("analyze", "skip", "需求简单，跳过")
-        elif step == "analyze_error":
-            progress.step("analyze", "error", step_result)
-        elif step == "generating":
-            progress.step("generate", "running")
-        elif step == "generated":
-            progress.step("generate", "done")
-        elif step == "generate_error":
-            progress.step("generate", "error", step_result)
-        elif step == "reviewing":
-            progress.step("review", "running")
-        elif step == "reviewed":
-            progress.step("review", "done")
-        elif step == "review_error":
-            progress.step("review", "error", step_result)
-        elif step == "optimizing":
-            progress.step("optimize", "running")
-        elif step == "completed":
-            progress.step("optimize", "done")
-            # 构建最终结果
-            result = WorkflowResult(
-                success=True,
-                final_test_cases=step_result,
-                generated_test_cases="",
-                review_feedback="",
-                errors=list(runtime_warnings)
-            )
-        elif step == "truncation_warnings":
-            runtime_warnings.extend(step_result if isinstance(step_result, list) else [str(step_result)])
-        elif step == "completed_with_fallback":
-            progress.step("optimize", "skip", "使用初始版本")
-            result = WorkflowResult(
-                success=True,
-                final_test_cases=step_result,
-                generated_test_cases=step_result,
-                review_feedback="",
-                errors=["优化失败，使用初始版本"] + list(runtime_warnings)
-            )
-        elif step.startswith("detail_"):
-            if verbose:
-                node_name = step.replace("detail_", "").replace("_input", " 输入").replace("_output", " 输出")
-                print(f"\n{'='*60}")
-                print(f"[详细] {node_name}")
-                print(f"{'='*60}")
-                if isinstance(step_result, dict):
-                    for k, v in step_result.items():
-                        v_str = str(v)
-                        print(f"  {k}: {v_str[:200]}..." if len(v_str) > 200 else f"  {k}: {v_str}")
-                else:
-                    s = str(step_result)
-                    print(s[:500] if len(s) > 500 else s)
-
-    # run_step_by_step 会在 completed 后再返回 warnings，这里统一并入最终结果
-    if result is not None and runtime_warnings:
-        seen = set(result.errors)
-        for warning in runtime_warnings:
-            if warning not in seen:
-                result.errors.append(warning)
-                seen.add(warning)
-
-    # 如果没有通过step-by-step获取到结果，直接运行
-    if result is None:
+    if agent_mode == "react":
+        progress.step("react", "running", "正在运行 ReAct Agent...")
         result = workflow.run(
             input_content,
             additional_instructions=additional_instructions,
             output_format=output_format
         )
+        progress.step("react", "done" if result.success else "error", "完成" if result.success else "; ".join(result.errors[:2]))
+        if detailed and verbose:
+            print_react_details(result)
+    else:
+        # 使用 step-by-step 运行以获取进度
+        for step, step_result in workflow.run_step_by_step(
+            input_content,
+            additional_instructions=additional_instructions,
+            output_format=output_format
+        ):
+            if step == "analyzing":
+                progress.step("analyze", "running")
+            elif step == "analyzed":
+                progress.step("analyze", "done")
+            elif step == "analyze_skipped_disabled":
+                progress.step("analyze", "skip", "未启用")
+            elif step == "analyze_skipped_simple":
+                progress.step("analyze", "skip", "需求简单，跳过")
+            elif step == "analyze_error":
+                progress.step("analyze", "error", step_result)
+            elif step == "generating":
+                progress.step("generate", "running")
+            elif step == "generated":
+                progress.step("generate", "done")
+            elif step == "generate_error":
+                progress.step("generate", "error", step_result)
+            elif step == "reviewing":
+                progress.step("review", "running")
+            elif step == "reviewed":
+                progress.step("review", "done")
+            elif step == "review_error":
+                progress.step("review", "error", step_result)
+            elif step == "optimizing":
+                progress.step("optimize", "running")
+            elif step == "completed":
+                progress.step("optimize", "done")
+                # 构建最终结果
+                result = WorkflowResult(
+                    success=True,
+                    final_test_cases=step_result,
+                    generated_test_cases="",
+                    review_feedback="",
+                    errors=list(runtime_warnings),
+                    metadata={
+                        "agent_mode": "workflow",
+                        "output_format": output_format,
+                        "split_validation_passed": split_validation_passed,
+                        "validation_passed": split_validation_passed,
+                        "agent_steps": [],
+                        "tools_used": [],
+                    }
+                )
+            elif step == "split_validation_passed":
+                split_validation_passed = bool(step_result)
+                if result is not None:
+                    result.metadata["split_validation_passed"] = split_validation_passed
+                    result.metadata["validation_passed"] = split_validation_passed
+            elif step == "truncation_warnings":
+                runtime_warnings.extend(step_result if isinstance(step_result, list) else [str(step_result)])
+            elif step == "completed_with_fallback":
+                progress.step("optimize", "skip", "使用初始版本")
+                result = WorkflowResult(
+                    success=True,
+                    final_test_cases=step_result,
+                    generated_test_cases=step_result,
+                    review_feedback="",
+                    errors=["优化失败，使用初始版本"] + list(runtime_warnings),
+                    metadata={
+                        "agent_mode": "workflow",
+                        "output_format": output_format,
+                        "split_validation_passed": not workflow._is_frontend_backend_mode(),
+                        "validation_passed": not workflow._is_frontend_backend_mode(),
+                        "agent_steps": [],
+                        "tools_used": [],
+                    }
+                )
+            elif step.startswith("detail_"):
+                if verbose:
+                    node_name = step.replace("detail_", "").replace("_input", " 输入").replace("_output", " 输出")
+                    print(f"\n{'='*60}")
+                    print(f"[详细] {node_name}")
+                    print(f"{'='*60}")
+                    if isinstance(step_result, dict):
+                        for k, v in step_result.items():
+                            v_str = str(v)
+                            print(f"  {k}: {v_str[:200]}..." if len(v_str) > 200 else f"  {k}: {v_str}")
+                    else:
+                        s = str(step_result)
+                        print(s[:500] if len(s) > 500 else s)
+
+        # run_step_by_step 会在 completed 后再返回 warnings，这里统一并入最终结果
+        if result is not None and runtime_warnings:
+            seen = set(result.errors)
+            for warning in runtime_warnings:
+                if warning not in seen:
+                    result.errors.append(warning)
+                    seen.add(warning)
+
+        # 如果没有通过step-by-step获取到结果，直接运行
+        if result is None:
+            result = workflow.run(
+                input_content,
+                additional_instructions=additional_instructions,
+                output_format=output_format
+            )
 
     # 自动保存到outputs目录
     if auto_save and result.success and result.final_test_cases:
@@ -561,6 +640,18 @@ def main():
         action="store_true",
         help="详细模式，输出各节点的输入输出内容"
     )
+    parser.add_argument(
+        "--agent-mode",
+        choices=["workflow", "react"],
+        default=settings.agent_mode,
+        help="执行模式：workflow（默认线性工作流）或 react（工具调用Agent）"
+    )
+    parser.add_argument(
+        "--max-agent-steps",
+        type=int,
+        default=settings.max_agent_steps,
+        help="ReAct Agent最大工具调用步数"
+    )
     
     # RAG选项
     parser.add_argument(
@@ -626,7 +717,9 @@ def main():
             stream_output=args.stream_output,
             verbose=not args.quiet if hasattr(args, 'quiet') else True,
             auto_save=args.auto_save,
-            detailed=args.detailed
+            detailed=args.detailed,
+            agent_mode=args.agent_mode,
+            max_agent_steps=args.max_agent_steps
         )
         
         # 输出结果

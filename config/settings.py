@@ -227,6 +227,14 @@ class Settings(BaseSettings):
         default=1,
         description="最大评审轮次"
     )
+    agent_mode: str = Field(
+        default="workflow",
+        description="Agent执行模式：workflow（默认线性工作流）或 react（工具调用Agent）"
+    )
+    max_agent_steps: int = Field(
+        default=10,
+        description="ReAct Agent最大工具调用步数"
+    )
     # 预留：大需求拆分功能
     enable_requirement_split: bool = Field(
         default=False,
