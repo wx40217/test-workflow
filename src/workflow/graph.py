@@ -126,6 +126,7 @@ class TestCaseWorkflow:
         # 工作流配置
         self.enable_analyzer = enable_analyzer if enable_analyzer is not None else settings.enable_analyzer
         self.analyzer_complexity_threshold = analyzer_complexity_threshold if analyzer_complexity_threshold is not None else settings.analyzer_complexity_threshold
+        self.detailed = False
 
         # 构建工作流图
         self._graph = self._build_graph()
@@ -541,6 +542,11 @@ class TestCaseWorkflow:
         else:
             yield ("analyzing", None)
             try:
+                if self.detailed:
+                    yield ("detail_analyzer_input", {
+                        "user_input": text_content[:500],
+                        "additional_instructions": additional_instructions,
+                    })
                 output = self.analyzer.invoke(
                     user_input=text_content,
                     additional_instructions=additional_instructions
@@ -548,6 +554,8 @@ class TestCaseWorkflow:
                 analysis_result = output.content
                 if output.is_truncated:
                     warnings.append(output.truncation_warning)
+                if self.detailed:
+                    yield ("detail_analyzer_output", analysis_result)
                 yield ("analyzed", analysis_result)
             except Exception as e:
                 yield ("analyze_error", str(e))
@@ -557,6 +565,14 @@ class TestCaseWorkflow:
         # 步骤1：生成
         yield ("generating", None)
         try:
+            if self.detailed:
+                rag_context = self.generator._get_rag_context(text_content) if self.generator.rag_interface else ""
+                yield ("detail_generator_input", {
+                    "user_input": text_content[:500],
+                    "additional_instructions": additional_instructions,
+                    "rag_context": rag_context[:500] if rag_context else "(无)",
+                    "analysis_result": analysis_result[:300] if analysis_result else "(无)",
+                })
             output = self.generator.invoke(
                 user_input=text_content,
                 additional_instructions=additional_instructions,
@@ -566,6 +582,8 @@ class TestCaseWorkflow:
             generated = output.content
             if output.is_truncated:
                 warnings.append(output.truncation_warning)
+            if self.detailed:
+                yield ("detail_generator_output", generated)
             yield ("generated", generated)
         except Exception as e:
             yield ("generate_error", str(e))
@@ -574,6 +592,11 @@ class TestCaseWorkflow:
         # 步骤2：评审
         yield ("reviewing", None)
         try:
+            if self.detailed:
+                yield ("detail_reviewer_input", {
+                    "original_input": text_content[:500],
+                    "test_cases": generated[:500],
+                })
             output = self.reviewer.invoke(
                 original_input=text_content,
                 test_cases=generated
@@ -581,6 +604,8 @@ class TestCaseWorkflow:
             feedback = output.content
             if output.is_truncated:
                 warnings.append(output.truncation_warning)
+            if self.detailed:
+                yield ("detail_reviewer_output", feedback)
             yield ("reviewed", feedback)
         except Exception as e:
             yield ("review_error", str(e))
@@ -591,6 +616,13 @@ class TestCaseWorkflow:
         yield ("optimizing", None)
         try:
             if feedback:
+                if self.detailed:
+                    yield ("detail_optimizer_input", {
+                        "original_input": text_content[:500],
+                        "initial_test_cases": generated[:500],
+                        "review_feedback": feedback[:500],
+                        "output_format": output_format or self.default_output_format,
+                    })
                 output = self.optimizer.invoke(
                     original_input=text_content,
                     initial_test_cases=generated,
@@ -600,6 +632,8 @@ class TestCaseWorkflow:
                 final = output.content
                 if output.is_truncated:
                     warnings.append(output.truncation_warning)
+                if self.detailed:
+                    yield ("detail_optimizer_output", final)
             else:
                 final = generated
             yield ("completed", final)

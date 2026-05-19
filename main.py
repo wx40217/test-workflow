@@ -25,6 +25,7 @@ import argparse
 import os
 import sys
 from datetime import datetime
+from pathlib import Path
 
 # 添加工作区到路径
 sys.path.insert(0, '/workspace')
@@ -160,7 +161,8 @@ def generate_test_cases(
     rag_documents: list[str] = None,
     stream_output: bool = False,
     verbose: bool = True,
-    auto_save: bool = False
+    auto_save: bool = False,
+    detailed: bool = False
 ) -> WorkflowResult:
     """
     从输入内容生成测试用例。
@@ -181,6 +183,7 @@ def generate_test_cases(
         stream_output: 是否将模型流式输出实时打印到控制台
         verbose: 是否打印进度信息（默认True）
         auto_save: 是否自动保存到outputs目录
+        detailed: 是否输出各节点的详细输入输出内容
 
     返回:
         包含最终测试用例的WorkflowResult
@@ -224,6 +227,12 @@ def generate_test_cases(
                 else:
                     rag_interface.add_documents([doc])
 
+        # 自动加载内置参考资料（test-master 方法论文档）
+        builtin_refs_dir = Path(__file__).parent / "references" / "test-master"
+        if builtin_refs_dir.exists():
+            for md_file in sorted(builtin_refs_dir.glob("*.md")):
+                rag_interface.add_from_file(str(md_file))
+
     # 创建工作流
     workflow = create_workflow(
         api_key=api_key,
@@ -241,6 +250,10 @@ def generate_test_cases(
         workflow.generator.rag_interface = rag_interface
         workflow.reviewer.rag_interface = rag_interface
         workflow.optimizer.rag_interface = rag_interface
+
+    # 设置详细模式
+    if detailed:
+        workflow.detailed = True
 
     # 可选：将各节点流式token实时打印到控制台
     if stream_output:
@@ -304,6 +317,19 @@ def generate_test_cases(
                 review_feedback="",
                 errors=["优化失败，使用初始版本"] + list(runtime_warnings)
             )
+        elif step.startswith("detail_"):
+            if verbose:
+                node_name = step.replace("detail_", "").replace("_input", " 输入").replace("_output", " 输出")
+                print(f"\n{'='*60}")
+                print(f"[详细] {node_name}")
+                print(f"{'='*60}")
+                if isinstance(step_result, dict):
+                    for k, v in step_result.items():
+                        v_str = str(v)
+                        print(f"  {k}: {v_str[:200]}..." if len(v_str) > 200 else f"  {k}: {v_str}")
+                else:
+                    s = str(step_result)
+                    print(s[:500] if len(s) > 500 else s)
 
     # run_step_by_step 会在 completed 后再返回 warnings，这里统一并入最终结果
     if result is not None and runtime_warnings:
@@ -530,6 +556,11 @@ def main():
         action="store_true",
         help="将模型流式响应实时输出到控制台"
     )
+    parser.add_argument(
+        "--detailed",
+        action="store_true",
+        help="详细模式，输出各节点的输入输出内容"
+    )
     
     # RAG选项
     parser.add_argument(
@@ -594,7 +625,8 @@ def main():
             rag_documents=args.rag_documents,
             stream_output=args.stream_output,
             verbose=not args.quiet if hasattr(args, 'quiet') else True,
-            auto_save=args.auto_save
+            auto_save=args.auto_save,
+            detailed=args.detailed
         )
         
         # 输出结果
