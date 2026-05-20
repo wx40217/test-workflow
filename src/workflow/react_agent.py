@@ -66,7 +66,7 @@ class TestCaseReactAgent:
 
             if not tool_calls:
                 final_text = self._extract_text(response)
-                if final_text and not state.final_test_cases:
+                if final_text and not state.final_test_cases and self._has_tool_candidate(state):
                     state.final_test_cases = final_text
                 reached_stop = self._should_stop(state)
                 step_count += 1
@@ -76,6 +76,8 @@ class TestCaseReactAgent:
                     "content_preview": final_text[:200],
                     "stop": reached_stop,
                 })
+                if final_text and not self._has_tool_candidate(state):
+                    state.errors.append("ReAct Agent未调用白名单工具，拒绝直接返回最终结果。")
                 break
 
             for tool_call in tool_calls:
@@ -164,7 +166,16 @@ class TestCaseReactAgent:
             ) from exc
 
     def _should_stop(self, state: ReactToolState) -> bool:
-        return bool(state.final_test_cases) and state.validation_passed and not state.review_has_blocking_issues
+        return (
+            bool(state.final_test_cases)
+            and state.validation_passed
+            and not state.review_has_blocking_issues
+            and state.reviewed_test_cases == state.final_test_cases
+        )
+
+    @staticmethod
+    def _has_tool_candidate(state: ReactToolState) -> bool:
+        return bool(state.generated_test_cases or state.current_test_cases or state.final_test_cases)
 
     @staticmethod
     def _extract_tool_calls(response: Any) -> list[dict[str, Any]]:

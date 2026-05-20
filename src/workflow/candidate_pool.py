@@ -59,7 +59,7 @@ class CandidatePool:
             created_at_step=created_at_step,
         )
         self._records.append(record)
-        self._trim()
+        self._trim(protected_id=record.id)
         return record
 
     def update_quality(
@@ -109,18 +109,27 @@ class CandidatePool:
     def to_list(self) -> list[dict[str, Any]]:
         return [record.to_dict() for record in self._records]
 
-    def _trim(self) -> None:
+    def _trim(self, protected_id: str = "") -> None:
         if len(self._records) <= self.max_size:
             return
         best = self.best()
-        newest = self._records[-(self.max_size - 1):]
         kept: list[CandidateRecord] = []
+        protected = self.get(protected_id) if protected_id else None
+        if protected is not None:
+            kept.append(protected)
         if best is not None:
-            kept.append(best)
-        for record in newest:
+            self._append_unique(kept, best)
+        for record in reversed(self._records):
             if record.id not in {item.id for item in kept}:
                 kept.append(record)
+            if len(kept) >= self.max_size:
+                break
         self._records = kept[: self.max_size]
+
+    @staticmethod
+    def _append_unique(records: list[CandidateRecord], record: CandidateRecord) -> None:
+        if record.id not in {item.id for item in records}:
+            records.append(record)
 
     def _next_id_number(self) -> int:
         max_id = 0

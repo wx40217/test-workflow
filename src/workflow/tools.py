@@ -56,6 +56,8 @@ class ReactToolState:
     analysis_result: str = ""
     rag_context: str = ""
     generated_test_cases: str = ""
+    current_test_cases: str = ""
+    reviewed_test_cases: str = ""
     review_feedback: str = ""
     final_test_cases: str = ""
     validation_passed: bool = True
@@ -203,25 +205,31 @@ class ReactWorkflowTools:
                 )
             self._merge_node_output_warning(output)
             self.state.generated_test_cases = output.content
+            self.state.current_test_cases = output.content
+            self.state.reviewed_test_cases = ""
+            self.state.review_feedback = ""
+            self.state.review_has_blocking_issues = False
             return ToolExecutionResult(ok=True, content=output.content).to_observation()
         except Exception as exc:
             return self._record_error("生成工具错误", exc).to_observation()
 
     def review_test_cases(self) -> str:
-        if not self.state.generated_test_cases:
+        candidate = self.state.current_test_cases or self.state.final_test_cases or self.state.generated_test_cases
+        if not candidate:
             return ToolExecutionResult(
                 ok=False,
-                issues=["缺少 generated_test_cases，需先调用 generate_test_cases。"],
+                issues=["缺少可评审候选，需先调用 generate_test_cases 或 optimize_test_cases。"],
             ).to_observation()
 
         try:
             with self._without_node_rag(self.workflow.reviewer):
                 output = self.workflow.reviewer.invoke(
                     original_input=self.state.user_input,
-                    test_cases=self.state.generated_test_cases,
+                    test_cases=candidate,
                 )
             self._merge_node_output_warning(output)
             self.state.review_feedback = output.content
+            self.state.reviewed_test_cases = candidate
             self.state.review_has_blocking_issues = self._has_blocking_review(output.content)
             return ToolExecutionResult(
                 ok=True,
@@ -232,7 +240,8 @@ class ReactWorkflowTools:
             return self._record_error("评审工具错误", exc).to_observation()
 
     def optimize_test_cases(self) -> str:
-        if not self.state.generated_test_cases:
+        candidate = self.state.current_test_cases or self.state.generated_test_cases
+        if not candidate:
             return ToolExecutionResult(
                 ok=False,
                 issues=["缺少 generated_test_cases，需先调用 generate_test_cases。"],
@@ -243,12 +252,17 @@ class ReactWorkflowTools:
             with self._without_node_rag(self.workflow.optimizer):
                 output = self.workflow.optimizer.invoke(
                     original_input=self.state.user_input,
-                    initial_test_cases=self.state.generated_test_cases,
+                    initial_test_cases=candidate,
                     review_feedback=feedback,
                     output_format=self.state.output_format,
                 )
             self._merge_node_output_warning(output)
             self.state.final_test_cases = output.content
+            self.state.current_test_cases = output.content
+            if self.state.review_feedback and not self.state.review_has_blocking_issues:
+                self.state.reviewed_test_cases = output.content
+            else:
+                self.state.reviewed_test_cases = ""
             return ToolExecutionResult(ok=True, content=output.content).to_observation()
         except Exception as exc:
             return self._record_error("优化工具错误", exc).to_observation()
@@ -313,9 +327,14 @@ class ReactWorkflowTools:
                 )
             self._merge_node_output_warning(output)
             self.state.final_test_cases = output.content
+            self.state.current_test_cases = output.content
             retry_validation = validate_fe_be_structure(output.content)
             self.state.validation_passed = retry_validation.is_valid
             self.state.validation_issues = list(retry_validation.issues)
+            if self.state.review_feedback and not self.state.review_has_blocking_issues:
+                self.state.reviewed_test_cases = output.content
+            else:
+                self.state.reviewed_test_cases = ""
             return ToolExecutionResult(
                 ok=retry_validation.is_valid,
                 content=output.content,
@@ -345,11 +364,27 @@ class ReactWorkflowTools:
         normalized = feedback.strip().lower()
         if not normalized:
             return False
-        pass_markers = ["无阻塞", "无严重", "通过", "no blocking", "no blocker", "approved"]
-        fail_markers = ["阻塞", "严重", "必须修复", "blocker", "blocking", "critical"]
-        if any(marker in normalized for marker in pass_markers):
-            return False
-        return any(marker in normalized for marker in fail_markers)
+        pass_markers = ["无阻塞", "无严重", "没有阻塞", "没有严重", "no blocking", "no blocker", "approved"]
+        sanitized = normalized
+        for marker in pass_markers:
+            sanitized = sanitized.replace(marker, "")
+        fail_markers = [
+            "不通过",
+            "未通过",
+            "无法通过",
+            "不能通过",
+            "阻塞",
+            "严重",
+            "必须修复",
+            "blocker",
+            "blocking",
+            "critical",
+            "not approved",
+            "failed",
+        ]
+        if any(marker in sanitized for marker in fail_markers):
+            return True
+        return False
 
     @contextmanager
     def _without_node_rag(self, node: Any):

@@ -73,6 +73,14 @@ class FakeNoToolBindingLLM:
         return AIMessage(content="不会被调用")
 
 
+class FakeFinalOnlyLLM:
+    def bind_tools(self, tools):
+        return self
+
+    def invoke(self, messages):
+        return AIMessage(content="## 用例\n**直接输出**")
+
+
 class FakeRAG:
     def is_enabled(self):
         return True
@@ -245,6 +253,47 @@ class ReactAgentTests(unittest.TestCase):
         self.assertNotIn("validate_output_structure", result.metadata["tools_used"])
         self.assertIn("最大步数限制", "\n".join(result.errors))
 
+    def test_direct_final_without_tools_is_rejected(self):
+        workflow = make_workflow()
+
+        result = TestCaseReactAgent(workflow, llm=FakeFinalOnlyLLM(), max_steps=3).run(
+            user_input="邮箱密码登录",
+            output_format="markdown",
+        )
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.final_test_cases, "")
+        self.assertEqual(result.metadata["tools_used"], [])
+        self.assertIn("未调用白名单工具", "\n".join(result.errors))
+
+    def test_blocking_review_requires_re_review_of_optimized_candidate(self):
+        workflow = make_workflow()
+        workflow.generator = FakeNode(["## 用例\n**登录成功**"])
+        workflow.reviewer = FakeNode([
+            "不通过，存在严重阻塞问题，必须修复：缺少失败锁定",
+            "无阻塞问题，通过",
+        ])
+        workflow.optimizer = FakeNode(["## 最终用例\n**登录成功**\n**失败锁定**"])
+
+        llm = FakeToolCallLLM([
+            "generate_test_cases",
+            "review_test_cases",
+            "optimize_test_cases",
+            "review_test_cases",
+        ])
+        result = TestCaseReactAgent(workflow, llm=llm, max_steps=6).run(
+            user_input="邮箱密码登录，3次失败锁定账户",
+            output_format="markdown",
+        )
+
+        self.assertTrue(result.success)
+        self.assertEqual(
+            result.metadata["tools_used"],
+            ["generate_test_cases", "review_test_cases", "optimize_test_cases", "review_test_cases"],
+        )
+        self.assertEqual(workflow.reviewer.calls[1]["test_cases"], "## 最终用例\n**登录成功**\n**失败锁定**")
+        self.assertIn("失败锁定", result.final_test_cases)
+
     def test_react_dependency_error_returns_workflow_result(self):
         workflow = make_workflow()
         workflow.generator._llm = FakeNoToolBindingLLM()
@@ -274,6 +323,8 @@ class ReactWorkflowToolsMockTests(unittest.TestCase):
         self.assertIn("status: ok", review_observation)
         self.assertIn("status: ok", optimize_observation)
         self.assertEqual(state.generated_test_cases, "## 用例\n**登录成功**")
+        self.assertEqual(state.current_test_cases, "## 最终用例\n**登录成功**")
+        self.assertEqual(state.reviewed_test_cases, "## 最终用例\n**登录成功**")
         self.assertEqual(state.review_feedback, "无阻塞问题，通过")
         self.assertEqual(state.final_test_cases, "## 最终用例\n**登录成功**")
         self.assertFalse(state.review_has_blocking_issues)
@@ -290,7 +341,7 @@ class ReactWorkflowToolsMockTests(unittest.TestCase):
         optimize_observation = tools.optimize_test_cases()
 
         self.assertIn("status: error", review_observation)
-        self.assertIn("缺少 generated_test_cases", review_observation)
+        self.assertIn("缺少可评审候选", review_observation)
         self.assertIn("status: error", optimize_observation)
         self.assertIn("缺少 generated_test_cases", optimize_observation)
         self.assertEqual(workflow.reviewer.calls, [])
@@ -343,6 +394,10 @@ class ReactWorkflowToolsMockTests(unittest.TestCase):
         self.assertIn("status: ok", repair_observation)
         self.assertTrue(state.validation_passed)
         self.assertIn("<table>", state.final_test_cases)
+
+    def test_blocking_review_detection_handles_negative_pass_wording(self):
+        self.assertTrue(ReactWorkflowTools._has_blocking_review("不通过，存在严重阻塞问题，必须修复"))
+        self.assertFalse(ReactWorkflowTools._has_blocking_review("无阻塞问题，通过"))
 
 
 if __name__ == "__main__":

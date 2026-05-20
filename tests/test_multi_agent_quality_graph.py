@@ -77,6 +77,16 @@ class CandidatePoolTests(unittest.TestCase):
         self.assertEqual(pool.best().review_summary["coverage_gaps"], [])
         self.assertEqual(len(pool.to_list()), 2)
 
+    def test_candidate_pool_size_one_keeps_new_current_candidate(self):
+        pool = CandidatePool(max_size=1)
+        first = pool.add_candidate("## 用例\n**旧候选**", source_agent="Generator Agent", round=0, created_at_step="generator")
+        pool.update_quality(first.id, quality_score=0.9, is_valid=True)
+
+        second = pool.add_candidate("## 用例\n**当前候选**", source_agent="Optimizer Agent", round=1, created_at_step="optimizer")
+
+        self.assertIsNotNone(pool.get(second.id))
+        self.assertEqual(pool.to_list()[0]["id"], second.id)
+
 
 class MultiAgentQualityGraphTests(unittest.TestCase):
     def test_mode_is_accepted_without_changing_default(self):
