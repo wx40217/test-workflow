@@ -98,7 +98,10 @@ class TestCaseWorkflow:
         agent_mode: Optional[str] = None,
         max_agent_steps: Optional[int] = None,
         max_review_rounds: Optional[int] = None,
-        quality_threshold: Optional[float] = None
+        quality_threshold: Optional[float] = None,
+        max_agent_rounds: Optional[int] = None,
+        candidate_pool_size: Optional[int] = None,
+        stop_on_no_improvement_rounds: Optional[int] = None
     ):
         """
         初始化工作流。
@@ -112,7 +115,7 @@ class TestCaseWorkflow:
             output_format: 默认输出格式 (markdown/confluence)
             enable_analyzer: 是否启用需求分析节点（None时使用settings配置）
             analyzer_complexity_threshold: 分析器复杂度阈值（None时使用settings配置）
-            agent_mode: 执行模式，workflow（默认）、react 或 quality-graph
+            agent_mode: 执行模式，workflow（默认）、react、quality-graph 或 multi-agent-quality-graph
             max_agent_steps: ReAct Agent最大工具调用步数
         """
         # 创建节点
@@ -136,8 +139,15 @@ class TestCaseWorkflow:
         self.max_agent_steps = max_agent_steps if max_agent_steps is not None else settings.max_agent_steps
         self.max_review_rounds = max_review_rounds if max_review_rounds is not None else settings.max_review_rounds
         self.quality_threshold = quality_threshold if quality_threshold is not None else settings.quality_threshold
-        if self.agent_mode not in {"workflow", "react", "quality-graph"}:
-            raise ValueError("agent_mode 必须是 workflow、react 或 quality-graph")
+        self.max_agent_rounds = max_agent_rounds if max_agent_rounds is not None else settings.max_agent_rounds
+        self.candidate_pool_size = candidate_pool_size if candidate_pool_size is not None else settings.candidate_pool_size
+        self.stop_on_no_improvement_rounds = (
+            stop_on_no_improvement_rounds
+            if stop_on_no_improvement_rounds is not None
+            else settings.stop_on_no_improvement_rounds
+        )
+        if self.agent_mode not in {"workflow", "react", "quality-graph", "multi-agent-quality-graph"}:
+            raise ValueError("agent_mode 必须是 workflow、react 或 quality-graph，也可以是 multi-agent-quality-graph")
         self.detailed = False
 
         # 构建工作流图
@@ -576,6 +586,74 @@ class TestCaseWorkflow:
                         "agent_trace": [],
                     },
                 )
+
+        if self.agent_mode == "multi-agent-quality-graph":
+            from src.workflow.multi_agent_graph import MultiAgentQualityGraphWorkflow
+
+            try:
+                agent = MultiAgentQualityGraphWorkflow(
+                    self,
+                    max_agent_rounds=self.max_agent_rounds,
+                    quality_threshold=self.quality_threshold,
+                    candidate_pool_size=self.candidate_pool_size,
+                    stop_on_no_improvement_rounds=self.stop_on_no_improvement_rounds,
+                )
+                final_state = agent.run(
+                    user_input=text_content,
+                    additional_instructions=additional_instructions,
+                    images=images,
+                    output_format=output_format or self.default_output_format,
+                )
+                final_test_cases = final_state.get("final_test_cases", "")
+                warnings = final_state.get("warnings", [])
+                errors = final_state.get("errors", [])
+                candidate_pool = final_state.get("candidate_pool", [])
+                return WorkflowResult(
+                    success=bool(final_test_cases),
+                    final_test_cases=final_test_cases,
+                    generated_test_cases=(candidate_pool[0].get("content", "") if candidate_pool else ""),
+                    review_feedback=((final_state.get("review_reports") or [{}])[-1].get("raw_feedback", "")),
+                    errors=errors + warnings,
+                    metadata={
+                        "agent_mode": "multi-agent-quality-graph",
+                        "output_format": final_state.get("output_format"),
+                        "has_images": len(images) > 0,
+                        "agent_rounds": final_state.get("agent_rounds", 0),
+                        "active_agents": final_state.get("active_agents", []),
+                        "candidate_count": len(candidate_pool),
+                        "candidate_pool": candidate_pool,
+                        "best_candidate_score": final_state.get("best_candidate_score", 0.0),
+                        "quality_passed": bool(final_state.get("quality_passed", False)),
+                        "quality_report": final_state.get("quality_report", {}),
+                        "validation_reports": final_state.get("validation_reports", []),
+                        "validation_passed": bool(final_state.get("validation_passed", False)),
+                        "review_reports": final_state.get("review_reports", []),
+                        "revision_plan": final_state.get("revision_plan", []),
+                        "requirement_analysis": final_state.get("requirement_analysis", {}),
+                        "retrieval_context": final_state.get("retrieval_context", {}),
+                        "agent_trace": final_state.get("agent_trace", []),
+                        "orchestrator_decision": final_state.get("orchestrator_decision", {}),
+                        "orchestrator_decisions": final_state.get("orchestrator_decisions", []),
+                        "no_improvement_rounds": final_state.get("no_improvement_rounds", 0),
+                    },
+                )
+            except Exception as e:
+                return WorkflowResult(
+                    success=False,
+                    final_test_cases="",
+                    errors=[f"多 Agent 质量图执行错误: {str(e)}"],
+                    metadata={
+                        "agent_mode": "multi-agent-quality-graph",
+                        "agent_rounds": 0,
+                        "active_agents": [],
+                        "candidate_count": 0,
+                        "best_candidate_score": 0.0,
+                        "quality_passed": False,
+                        "validation_reports": [],
+                        "validation_passed": False,
+                        "agent_trace": [],
+                    },
+                )
         
         # 初始化状态
         initial_state: WorkflowState = {
@@ -799,7 +877,10 @@ def create_workflow(
     agent_mode: Optional[str] = None,
     max_agent_steps: Optional[int] = None,
     max_review_rounds: Optional[int] = None,
-    quality_threshold: Optional[float] = None
+    quality_threshold: Optional[float] = None,
+    max_agent_rounds: Optional[int] = None,
+    candidate_pool_size: Optional[int] = None,
+    stop_on_no_improvement_rounds: Optional[int] = None
 ) -> TestCaseWorkflow:
     """
     创建自定义配置工作流的工厂函数。
@@ -815,7 +896,7 @@ def create_workflow(
         output_format: 默认输出格式
         enable_rag: 是否启用RAG
         rag_config: RAG配置字典
-        agent_mode: 执行模式，workflow（默认）、react 或 quality-graph
+        agent_mode: 执行模式，workflow（默认）、react、quality-graph 或 multi-agent-quality-graph
         max_agent_steps: ReAct Agent最大工具调用步数
         
     返回:
@@ -893,5 +974,8 @@ def create_workflow(
         agent_mode=agent_mode,
         max_agent_steps=max_agent_steps,
         max_review_rounds=max_review_rounds,
-        quality_threshold=quality_threshold
+        quality_threshold=quality_threshold,
+        max_agent_rounds=max_agent_rounds,
+        candidate_pool_size=candidate_pool_size,
+        stop_on_no_improvement_rounds=stop_on_no_improvement_rounds
     )

@@ -40,6 +40,33 @@ class FakeQualityWorkflow:
         )
 
 
+class FakeMultiAgentWorkflow(FakeQualityWorkflow):
+    def run(self, input_content, additional_instructions="", output_format="markdown"):
+        self.calls.append({
+            "input_content": input_content,
+            "additional_instructions": additional_instructions,
+            "output_format": output_format,
+        })
+        return WorkflowResult(
+            success=True,
+            final_test_cases="## 用例\n**登录成功**\n- 邮箱密码登录。\n**失败锁定**\n- 连续3次失败后锁定账户。",
+            generated_test_cases="## 草稿",
+            review_feedback="无阻塞问题，通过",
+            errors=[],
+            metadata={
+                "agent_mode": "multi-agent-quality-graph",
+                "agent_rounds": 1,
+                "active_agents": ["Orchestrator", "Planner Agent", "Validator"],
+                "candidate_count": 2,
+                "best_candidate_score": 0.9,
+                "quality_passed": True,
+                "validation_reports": [{"passed": True, "issues": []}],
+                "validation_passed": True,
+                "agent_trace": [{"node": "Finalizer Agent", "detail": "done", "round": 1}],
+            },
+        )
+
+
 class MainQualityGraphTests(unittest.TestCase):
     def test_generate_test_cases_passes_quality_graph_options_to_factory(self):
         captured = {}
@@ -164,6 +191,104 @@ class MainQualityGraphTests(unittest.TestCase):
         self.assertIn("Quality Graph Trace", output)
         self.assertIn("quality_score", output)
         self.assertIn("finalize", output)
+
+    def test_generate_test_cases_passes_multi_agent_options_to_factory(self):
+        captured = {}
+        fake_workflow = FakeMultiAgentWorkflow()
+
+        def fake_create_workflow(**kwargs):
+            captured.update(kwargs)
+            return fake_workflow
+
+        with patch("main.create_workflow", side_effect=fake_create_workflow):
+            result = main.generate_test_cases(
+                "用户登录功能：支持邮箱密码登录，3次失败锁定账户",
+                api_key="test-key",
+                verbose=False,
+                agent_mode="multi-agent-quality-graph",
+                max_agent_rounds=3,
+                candidate_pool_size=6,
+                stop_on_no_improvement_rounds=2,
+                quality_threshold=0.82,
+                show_agent_trace=True,
+            )
+
+        self.assertTrue(result.success)
+        self.assertEqual(captured["agent_mode"], "multi-agent-quality-graph")
+        self.assertEqual(captured["max_agent_rounds"], 3)
+        self.assertEqual(captured["candidate_pool_size"], 6)
+        self.assertEqual(captured["stop_on_no_improvement_rounds"], 2)
+        self.assertEqual(captured["quality_threshold"], 0.82)
+        self.assertNotIn("agent_trace", result.final_test_cases)
+
+    def test_cli_quiet_multi_agent_quality_graph_accepts_new_options(self):
+        fake_result = WorkflowResult(
+            success=True,
+            final_test_cases="## 用例\n**登录成功**",
+            metadata={
+                "agent_mode": "multi-agent-quality-graph",
+                "agent_trace": [{"node": "Finalizer Agent"}],
+                "best_candidate_score": 0.9,
+            },
+        )
+        argv = [
+            "main.py",
+            "--input",
+            "用户登录功能：支持邮箱密码登录，3次失败锁定账户",
+            "--agent-mode",
+            "multi-agent-quality-graph",
+            "--max-agent-rounds",
+            "3",
+            "--candidate-pool-size",
+            "6",
+            "--stop-on-no-improvement-rounds",
+            "2",
+            "--quality-threshold",
+            "0.82",
+            "--show-agent-trace",
+            "--quiet",
+        ]
+        captured_kwargs = {}
+
+        def fake_generate_test_cases(*args, **kwargs):
+            captured_kwargs.update(kwargs)
+            return fake_result
+
+        stdout = io.StringIO()
+        with patch("sys.argv", argv), patch("main.generate_test_cases", side_effect=fake_generate_test_cases):
+            with redirect_stdout(stdout):
+                with self.assertRaises(SystemExit) as exit_ctx:
+                    main.main()
+
+        self.assertEqual(exit_ctx.exception.code, 0)
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertEqual(captured_kwargs["agent_mode"], "multi-agent-quality-graph")
+        self.assertEqual(captured_kwargs["max_agent_rounds"], 3)
+        self.assertEqual(captured_kwargs["candidate_pool_size"], 6)
+        self.assertEqual(captured_kwargs["stop_on_no_improvement_rounds"], 2)
+        self.assertEqual(captured_kwargs["quality_threshold"], 0.82)
+        self.assertTrue(captured_kwargs["show_agent_trace"])
+        self.assertFalse(captured_kwargs["verbose"])
+
+    def test_show_agent_trace_prints_multi_agent_trace_when_verbose(self):
+        fake_workflow = FakeMultiAgentWorkflow()
+
+        with patch("main.create_workflow", return_value=fake_workflow):
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                result = main.generate_test_cases(
+                    "用户登录功能：支持邮箱密码登录，3次失败锁定账户",
+                    api_key="test-key",
+                    verbose=True,
+                    agent_mode="multi-agent-quality-graph",
+                    show_agent_trace=True,
+                )
+
+        self.assertTrue(result.success)
+        output = stdout.getvalue()
+        self.assertIn("Multi-Agent Quality Graph Trace", output)
+        self.assertIn("candidate_count", output)
+        self.assertIn("Finalizer Agent", output)
 
 
 if __name__ == "__main__":

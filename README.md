@@ -15,7 +15,7 @@
 ## 功能特性
 
 - **多节点工作流**: 分析(可选) -> 生成 -> 评审 -> 优化，确保测试用例质量
-- **三种执行模式**: `workflow` 线性工作流、`react` 工具调用 Agent、`quality-graph` 质量闭环状态图
+- **四种执行模式**: `workflow` 线性工作流、`react` 工具调用 Agent、`quality-graph` 质量闭环状态图、`multi-agent-quality-graph` 多 Agent 质量图
 - **智能需求分析**: 可选的需求分析节点，自动识别复杂需求并进行结构化分析
 - **实时进度显示**: 执行过程中显示详细进度和耗时统计
 - **多种输入支持**: 文本、Word、PDF、Excel、PowerPoint、图片
@@ -206,13 +206,14 @@ python main.py --input "..." \
 python main.py --interactive
 ```
 
-### 三种执行模式
+### 四种执行模式
 
 | 模式 | 适用场景 | 执行特点 | 关键参数 |
 |------|----------|----------|----------|
 | `workflow` | 默认稳定路径、常规需求、批量生成 | 固定顺序：分析（可选）-> 生成 -> 评审 -> 优化 | `--agent-mode workflow` |
 | `react` | 需要模型按需选择分析、RAG、生成、评审、结构校验工具 | LangChain tool calling，受 `max_agent_steps` 限制 | `--agent-mode react --max-agent-steps 8` |
 | `quality-graph` | 高质量交付、复杂需求、需要可解释质量门禁 | LangGraph 显式节点：生成、评审、质量评分、决策、修订、校验、收敛 | `--agent-mode quality-graph --max-review-rounds 3 --quality-threshold 0.8` |
+| `multi-agent-quality-graph` | 需要职责分离、候选池、可观察共享状态和确定性质量门 | Orchestrator 协调 Planner、Retrieval、Generator、Reviewer、Optimizer、Validator、Finalizer，基于候选池和质量证据收敛 | `--agent-mode multi-agent-quality-graph --max-agent-rounds 2 --candidate-pool-size 5` |
 
 ```bash
 # 默认线性工作流
@@ -228,6 +229,14 @@ python main.py --input "用户登录功能：邮箱密码登录，3次失败锁�
 python main.py --input "用户登录功能：邮箱密码登录，3次失败锁定" \
   --agent-mode quality-graph \
   --max-review-rounds 3 \
+  --quality-threshold 0.8 \
+  --show-agent-trace
+
+# 多 Agent 质量图
+python main.py --input "用户登录功能：邮箱密码登录，3次失败锁定" \
+  --agent-mode multi-agent-quality-graph \
+  --max-agent-rounds 2 \
+  --candidate-pool-size 5 \
   --quality-threshold 0.8 \
   --show-agent-trace
 ```
@@ -354,10 +363,13 @@ result = generate_test_cases(
 |--------|------|--------|
 | `ENABLE_ANALYZER` | 是否启用需求分析节点 | false |
 | `ANALYZER_COMPLEXITY_THRESHOLD` | 复杂度阈值（1-5），满足几个指标时触发分析 | 2 |
-| `AGENT_MODE` | 执行模式：`workflow`、`react` 或 `quality-graph` | workflow |
+| `AGENT_MODE` | 执行模式：`workflow`、`react`、`quality-graph` 或 `multi-agent-quality-graph` | workflow |
 | `MAX_AGENT_STEPS` | ReAct Agent 最大工具调用步数 | 10 |
 | `MAX_REVIEW_ROUNDS` | quality-graph 最大评审/修订轮次 | 1 |
-| `QUALITY_THRESHOLD` | quality-graph 质量通过阈值 | 0.75 |
+| `MAX_AGENT_ROUNDS` | multi-agent-quality-graph 最大修订轮次 | 2 |
+| `QUALITY_THRESHOLD` | quality-graph / multi-agent-quality-graph 质量通过阈值 | 0.75 |
+| `CANDIDATE_POOL_SIZE` | multi-agent-quality-graph 候选池最大保留数量 | 5 |
+| `STOP_ON_NO_IMPROVEMENT_ROUNDS` | multi-agent-quality-graph 连续无质量提升时提前停止轮数 | 2 |
 | `SHOW_AGENT_TRACE` | 是否在详细输出中展示 Agent trace | false |
 
 **复杂度指标说明：**

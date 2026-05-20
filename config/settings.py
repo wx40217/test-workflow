@@ -227,9 +227,21 @@ class Settings(BaseSettings):
         default=1,
         description="最大评审轮次"
     )
+    max_agent_rounds: int = Field(
+        default=2,
+        description="multi-agent-quality-graph 最大修订轮次"
+    )
     quality_threshold: float = Field(
         default=0.75,
-        description="quality-graph 模式的质量通过阈值"
+        description="quality-graph / multi-agent-quality-graph 模式的质量通过阈值"
+    )
+    candidate_pool_size: int = Field(
+        default=5,
+        description="multi-agent-quality-graph 候选池最大保留数量"
+    )
+    stop_on_no_improvement_rounds: int = Field(
+        default=2,
+        description="multi-agent-quality-graph 连续无质量提升时提前停止的轮数"
     )
     show_agent_trace: bool = Field(
         default=False,
@@ -237,7 +249,7 @@ class Settings(BaseSettings):
     )
     agent_mode: str = Field(
         default="workflow",
-        description="Agent执行模式：workflow（默认线性工作流）、react（工具调用Agent）或 quality-graph（质量闭环状态图）"
+        description="Agent执行模式：workflow（默认线性工作流）、react、quality-graph 或 multi-agent-quality-graph"
     )
     max_agent_steps: int = Field(
         default=10,

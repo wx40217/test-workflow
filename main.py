@@ -166,22 +166,29 @@ def print_react_details(result: WorkflowResult) -> None:
 
 
 def print_quality_graph_details(result: WorkflowResult) -> None:
-    """打印 quality-graph 模式的质量闭环摘要。"""
+    """打印 quality-graph / multi-agent-quality-graph 模式的质量闭环摘要。"""
     metadata = result.metadata or {}
     print(f"\n{'='*60}")
-    print("[详细] Quality Graph Trace")
+    title = "Multi-Agent Quality Graph Trace" if metadata.get("agent_mode") == "multi-agent-quality-graph" else "Quality Graph Trace"
+    print(f"[详细] {title}")
     print(f"{'='*60}")
     print(f"  agent_mode: {metadata.get('agent_mode')}")
-    print(f"  review_rounds: {metadata.get('review_rounds')}")
+    if metadata.get("agent_mode") == "multi-agent-quality-graph":
+        print(f"  agent_rounds: {metadata.get('agent_rounds')}")
+        print(f"  active_agents: {', '.join(metadata.get('active_agents') or [])}")
+        print(f"  candidate_count: {metadata.get('candidate_count')}")
+        print(f"  best_candidate_score: {metadata.get('best_candidate_score')}")
+    else:
+        print(f"  review_rounds: {metadata.get('review_rounds')}")
     print(f"  quality_passed: {metadata.get('quality_passed')}")
     print(f"  quality_score: {metadata.get('quality_score')}")
     print(f"  validation_passed: {metadata.get('validation_passed')}")
-    decision = metadata.get("decision") or {}
+    decision = metadata.get("decision") or metadata.get("orchestrator_decision") or {}
     if decision:
         print(f"  decision: {decision.get('route')} - {decision.get('reason')}")
 
     for item in metadata.get("agent_trace") or []:
-        print(f"  - {item.get('node')}: {item.get('detail')} (round={item.get('review_round')})")
+        print(f"  - {item.get('node')}: {item.get('detail')} (round={item.get('review_round', item.get('round'))})")
 
 
 def _indent_preview(text: str, prefix: str) -> str:
@@ -225,7 +232,10 @@ def generate_test_cases(
     agent_mode: str = "workflow",
     max_agent_steps: int = None,
     max_review_rounds: int = None,
+    max_agent_rounds: int = None,
     quality_threshold: float = None,
+    candidate_pool_size: int = None,
+    stop_on_no_improvement_rounds: int = None,
     show_agent_trace: bool = None
 ) -> WorkflowResult:
     """
@@ -248,10 +258,13 @@ def generate_test_cases(
         verbose: 是否打印进度信息（默认True）
         auto_save: 是否自动保存到outputs目录
         detailed: 是否输出各节点的详细输入输出内容
-        agent_mode: 执行模式，workflow（默认）、react 或 quality-graph
+        agent_mode: 执行模式，workflow（默认）、react、quality-graph 或 multi-agent-quality-graph
         max_agent_steps: ReAct Agent最大工具调用步数
         max_review_rounds: quality-graph 最大评审/修订轮次
-        quality_threshold: quality-graph 质量通过阈值
+        max_agent_rounds: multi-agent-quality-graph 最大修订轮次
+        quality_threshold: quality-graph / multi-agent-quality-graph 质量通过阈值
+        candidate_pool_size: multi-agent-quality-graph 候选池大小
+        stop_on_no_improvement_rounds: multi-agent-quality-graph 连续无提升停止轮数
         show_agent_trace: 是否输出 Agent trace（默认使用 settings.show_agent_trace）
 
     返回:
@@ -315,7 +328,10 @@ def generate_test_cases(
         agent_mode=agent_mode,
         max_agent_steps=max_agent_steps,
         max_review_rounds=max_review_rounds,
-        quality_threshold=quality_threshold
+        quality_threshold=quality_threshold,
+        max_agent_rounds=max_agent_rounds,
+        candidate_pool_size=candidate_pool_size,
+        stop_on_no_improvement_rounds=stop_on_no_improvement_rounds
     )
 
     # 如果创建了则附加RAG接口
@@ -341,8 +357,10 @@ def generate_test_cases(
     runtime_warnings: list[str] = []
     split_validation_passed = True
 
-    if agent_mode in {"react", "quality-graph"}:
+    if agent_mode in {"react", "quality-graph", "multi-agent-quality-graph"}:
         step_name = "quality-graph" if agent_mode == "quality-graph" else "react"
+        if agent_mode == "multi-agent-quality-graph":
+            step_name = "multi-agent-quality-graph"
         progress.step(step_name, "running", f"正在运行 {step_name}...")
         result = workflow.run(
             input_content,
@@ -680,9 +698,9 @@ def main():
     )
     parser.add_argument(
         "--agent-mode",
-        choices=["workflow", "react", "quality-graph"],
+        choices=["workflow", "react", "quality-graph", "multi-agent-quality-graph"],
         default=settings.agent_mode,
-        help="执行模式：workflow（默认线性工作流）、react（工具调用Agent）或 quality-graph（质量闭环状态图）"
+        help="执行模式：workflow（默认线性工作流）、react、quality-graph 或 multi-agent-quality-graph"
     )
     parser.add_argument(
         "--max-agent-steps",
@@ -697,10 +715,28 @@ def main():
         help="quality-graph 最大评审/修订轮次"
     )
     parser.add_argument(
+        "--max-agent-rounds",
+        type=int,
+        default=settings.max_agent_rounds,
+        help="multi-agent-quality-graph 最大修订轮次"
+    )
+    parser.add_argument(
         "--quality-threshold",
         type=float,
         default=settings.quality_threshold,
-        help="quality-graph 质量通过阈值"
+        help="quality-graph / multi-agent-quality-graph 质量通过阈值"
+    )
+    parser.add_argument(
+        "--candidate-pool-size",
+        type=int,
+        default=settings.candidate_pool_size,
+        help="multi-agent-quality-graph 候选池最大保留数量"
+    )
+    parser.add_argument(
+        "--stop-on-no-improvement-rounds",
+        type=int,
+        default=settings.stop_on_no_improvement_rounds,
+        help="multi-agent-quality-graph 连续无质量提升时提前停止的轮数"
     )
     
     # RAG选项
@@ -771,7 +807,10 @@ def main():
             agent_mode=args.agent_mode,
             max_agent_steps=args.max_agent_steps,
             max_review_rounds=args.max_review_rounds,
+            max_agent_rounds=args.max_agent_rounds,
             quality_threshold=args.quality_threshold,
+            candidate_pool_size=args.candidate_pool_size,
+            stop_on_no_improvement_rounds=args.stop_on_no_improvement_rounds,
             show_agent_trace=args.show_agent_trace
         )
         
