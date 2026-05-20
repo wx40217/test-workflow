@@ -6,6 +6,7 @@ from config.settings import ModelConfig
 from src.workflow.graph import TestCaseWorkflow
 from src.workflow.nodes import NodeOutput
 from src.workflow.react_agent import TestCaseReactAgent
+from src.workflow.tools import ReactToolState, ReactWorkflowTools
 
 
 class FakeNode:
@@ -254,6 +255,94 @@ class ReactAgentTests(unittest.TestCase):
         self.assertEqual(result.metadata["agent_mode"], "react")
         self.assertEqual(result.metadata["tools_used"], [])
         self.assertIn("不支持 bind_tools", "\n".join(result.errors))
+
+
+class ReactWorkflowToolsMockTests(unittest.TestCase):
+    def test_generate_review_optimize_tools_update_shared_state(self):
+        workflow = make_workflow()
+        workflow.generator = FakeNode(["## 用例\n**登录成功**"])
+        workflow.reviewer = FakeNode(["无阻塞问题，通过"])
+        workflow.optimizer = FakeNode(["## 最终用例\n**登录成功**"])
+        state = ReactToolState(user_input="邮箱密码登录", output_format="markdown")
+        tools = ReactWorkflowTools(workflow, state)
+
+        generate_observation = tools.generate_test_cases()
+        review_observation = tools.review_test_cases()
+        optimize_observation = tools.optimize_test_cases()
+
+        self.assertIn("status: ok", generate_observation)
+        self.assertIn("status: ok", review_observation)
+        self.assertIn("status: ok", optimize_observation)
+        self.assertEqual(state.generated_test_cases, "## 用例\n**登录成功**")
+        self.assertEqual(state.review_feedback, "无阻塞问题，通过")
+        self.assertEqual(state.final_test_cases, "## 最终用例\n**登录成功**")
+        self.assertFalse(state.review_has_blocking_issues)
+        self.assertEqual(workflow.generator.calls[0]["user_input"], "邮箱密码登录")
+
+    def test_tools_report_precondition_errors_without_calling_nodes(self):
+        workflow = make_workflow()
+        workflow.reviewer = FakeNode(["不应被调用"])
+        workflow.optimizer = FakeNode(["不应被调用"])
+        state = ReactToolState(user_input="邮箱密码登录")
+        tools = ReactWorkflowTools(workflow, state)
+
+        review_observation = tools.review_test_cases()
+        optimize_observation = tools.optimize_test_cases()
+
+        self.assertIn("status: error", review_observation)
+        self.assertIn("缺少 generated_test_cases", review_observation)
+        self.assertIn("status: error", optimize_observation)
+        self.assertIn("缺少 generated_test_cases", optimize_observation)
+        self.assertEqual(workflow.reviewer.calls, [])
+        self.assertEqual(workflow.optimizer.calls, [])
+
+    def test_retrieve_rag_context_and_generate_merge_rag_instructions(self):
+        workflow = make_workflow()
+        workflow.rag_interface = FakeRAG()
+        workflow.generator = FakeNode(["## 用例\n**登录安全**"])
+        state = ReactToolState(
+            user_input="邮箱密码登录",
+            additional_instructions="输出边界值",
+        )
+        tools = ReactWorkflowTools(workflow, state)
+
+        rag_observation = tools.retrieve_rag_context("登录安全")
+        tools.generate_test_cases()
+
+        self.assertIn("登录安全测试参考", rag_observation)
+        self.assertIn("登录安全测试参考", state.rag_context)
+        generator_instructions = workflow.generator.calls[0]["additional_instructions"]
+        self.assertIn("输出边界值", generator_instructions)
+        self.assertIn("RAG 检索上下文", generator_instructions)
+        self.assertIn("登录安全测试参考", generator_instructions)
+
+    def test_validate_and_repair_frontend_backend_structure(self):
+        workflow = make_workflow(split_mode="frontend_backend")
+        workflow.optimizer = FakeNode([
+            (
+                "<table><tr><th>功能点</th><th>前端用例</th><th>后端用例</th></tr>"
+                "<tr><td>登录</td><td>页面输入邮箱密码并点击登录</td>"
+                "<td>校验密码错误次数并锁定账户</td></tr></table>"
+            )
+        ], split_mode="frontend_backend")
+        state = ReactToolState(
+            user_input="邮箱密码登录",
+            generated_test_cases="初始用例",
+            review_feedback="无阻塞问题，通过",
+            final_test_cases="缺少表格的最终内容",
+            output_format="confluence",
+            validation_passed=False,
+        )
+        tools = ReactWorkflowTools(workflow, state)
+
+        validation_observation = tools.validate_output_structure()
+        repair_observation = tools.repair_output_structure()
+
+        self.assertIn("status: error", validation_observation)
+        self.assertFalse("缺少表格的最终内容" in state.validation_issues)
+        self.assertIn("status: ok", repair_observation)
+        self.assertTrue(state.validation_passed)
+        self.assertIn("<table>", state.final_test_cases)
 
 
 if __name__ == "__main__":

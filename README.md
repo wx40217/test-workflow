@@ -15,6 +15,7 @@
 ## 功能特性
 
 - **多节点工作流**: 分析(可选) -> 生成 -> 评审 -> 优化，确保测试用例质量
+- **三种执行模式**: `workflow` 线性工作流、`react` 工具调用 Agent、`quality-graph` 质量闭环状态图
 - **智能需求分析**: 可选的需求分析节点，自动识别复杂需求并进行结构化分析
 - **实时进度显示**: 执行过程中显示详细进度和耗时统计
 - **多种输入支持**: 文本、Word、PDF、Excel、PowerPoint、图片
@@ -22,6 +23,7 @@
 - **多种输出格式**: Markdown 嵌套列表、Confluence 任务列表
 - **自动保存**: 支持自动保存到 outputs 目录
 - **RAG 支持**: 预留知识库检索增强接口
+- **质量门禁**: `quality-graph` 会生成结构化质量报告、质量分、修订计划和确定性校验结果
 - **可配置提示词**: 支持自定义各节点的提示词
 
 ## 项目结构
@@ -44,7 +46,11 @@
 │   ├── workflow/
 │   │   ├── __init__.py
 │   │   ├── nodes.py             # LLM 节点定义（含分析器节点）
-│   │   └── graph.py             # LangGraph 工作流
+│   │   ├── graph.py             # 默认 workflow 编排
+│   │   ├── react_agent.py       # ReAct 工具调用 Agent
+│   │   ├── tools.py             # ReAct 白名单工具
+│   │   ├── quality.py           # 确定性质量报告和路由判断
+│   │   └── quality_graph.py     # quality-graph 质量闭环状态图
 │   ├── input_handler/
 │   │   ├── __init__.py
 │   │   └── handlers.py          # 输入处理器
@@ -55,7 +61,9 @@
 │       ├── __init__.py
 │       └── interface.py         # RAG 接口
 └── examples/
-    └── basic_usage.py           # 使用示例
+    ├── basic_usage.py           # 基础 workflow 示例
+    ├── react_usage.py           # react 模式示例
+    └── quality_graph_usage.py   # quality-graph 模式示例
 ```
 
 ### 目录说明
@@ -198,6 +206,32 @@ python main.py --input "..." \
 python main.py --interactive
 ```
 
+### 三种执行模式
+
+| 模式 | 适用场景 | 执行特点 | 关键参数 |
+|------|----------|----------|----------|
+| `workflow` | 默认稳定路径、常规需求、批量生成 | 固定顺序：分析（可选）-> 生成 -> 评审 -> 优化 | `--agent-mode workflow` |
+| `react` | 需要模型按需选择分析、RAG、生成、评审、结构校验工具 | LangChain tool calling，受 `max_agent_steps` 限制 | `--agent-mode react --max-agent-steps 8` |
+| `quality-graph` | 高质量交付、复杂需求、需要可解释质量门禁 | LangGraph 显式节点：生成、评审、质量评分、决策、修订、校验、收敛 | `--agent-mode quality-graph --max-review-rounds 3 --quality-threshold 0.8` |
+
+```bash
+# 默认线性工作流
+python main.py --input "用户登录功能：邮箱密码登录，3次失败锁定" --agent-mode workflow
+
+# ReAct 工具调用 Agent
+python main.py --input "用户登录功能：邮箱密码登录，3次失败锁定" \
+  --agent-mode react \
+  --max-agent-steps 8 \
+  --show-agent-trace
+
+# 质量闭环状态图
+python main.py --input "用户登录功能：邮箱密码登录，3次失败锁定" \
+  --agent-mode quality-graph \
+  --max-review-rounds 3 \
+  --quality-threshold 0.8 \
+  --show-agent-trace
+```
+
 ### 方式二：编程调用
 
 **基本调用：**
@@ -245,6 +279,38 @@ workflow = TestCaseWorkflow(
 )
 ```
 
+**选择 Agent 模式：**
+
+```python
+from main import generate_test_cases
+
+react_result = generate_test_cases(
+    "用户登录功能：邮箱密码登录，3次失败锁定账户",
+    api_key="sk-...",
+    agent_mode="react",
+    max_agent_steps=8,
+    show_agent_trace=True,
+)
+
+quality_result = generate_test_cases(
+    "退款功能：未发货退款、优惠券回滚、风控人工审核",
+    api_key="sk-...",
+    agent_mode="quality-graph",
+    max_review_rounds=3,
+    quality_threshold=0.8,
+    show_agent_trace=True,
+)
+
+print(quality_result.metadata["quality_score"])
+```
+
+**独立示例：**
+
+```bash
+python examples/react_usage.py
+python examples/quality_graph_usage.py
+```
+
 **逐步执行并获取中间结果：**
 
 ```python
@@ -288,7 +354,11 @@ result = generate_test_cases(
 |--------|------|--------|
 | `ENABLE_ANALYZER` | 是否启用需求分析节点 | false |
 | `ANALYZER_COMPLEXITY_THRESHOLD` | 复杂度阈值（1-5），满足几个指标时触发分析 | 2 |
-| `MAX_REVIEW_ROUNDS` | 最大评审轮次（预留） | 1 |
+| `AGENT_MODE` | 执行模式：`workflow`、`react` 或 `quality-graph` | workflow |
+| `MAX_AGENT_STEPS` | ReAct Agent 最大工具调用步数 | 10 |
+| `MAX_REVIEW_ROUNDS` | quality-graph 最大评审/修订轮次 | 1 |
+| `QUALITY_THRESHOLD` | quality-graph 质量通过阈值 | 0.75 |
+| `SHOW_AGENT_TRACE` | 是否在详细输出中展示 Agent trace | false |
 
 **复杂度指标说明：**
 - 需求描述超过 200 字符
@@ -385,8 +455,10 @@ cp .env.example .env
 - `prompts.py`: 提示词模板管理，支持动态自定义
 
 **工作流层 (`src/workflow/`)**
-- `nodes.py`: 定义三个 LLM 节点（Generator、Reviewer、Optimizer）
-- `graph.py`: 使用 LangGraph 定义工作流图和状态管理
+- `nodes.py`: 定义 LLM 节点（Analyzer、Generator、Reviewer、Optimizer）
+- `graph.py`: 默认 workflow 编排和模式分发
+- `react_agent.py` / `tools.py`: ReAct 模式和受限工具白名单
+- `quality.py` / `quality_graph.py`: 确定性质量报告、路由决策和质量闭环状态图
 
 **输入处理层 (`src/input_handler/`)**
 - `handlers.py`: 处理各种输入类型，提取文本和图片
@@ -402,10 +474,29 @@ cp .env.example .env
 ```bash
 # 运行示例
 python examples/basic_usage.py
+python examples/react_usage.py
+python examples/quality_graph_usage.py
 
 # 测试命令行
 python main.py --input "测试需求" --verbose
+
+# 运行单元测试
+python -m unittest
 ```
+
+## Benchmark
+
+以下 5 条需求用于比较三种模式的预期收益和成本。表中结论基于当前实现的能力边界：`workflow` 固定三节点，`react` 依赖模型 tool calling 自主调度，`quality-graph` 具备确定性质量报告、修订循环和结构校验。
+
+| # | 需求类型 | 推荐模式 | workflow 预期 | react 预期 | quality-graph 预期 | 结论 |
+|---|----------|----------|---------------|------------|--------------------|------|
+| 1 | 简单登录：邮箱密码登录、失败锁定 | `workflow` | 成本低，路径稳定 | 工具调度收益有限 | 质量报告可用但偏重 | 不需要多 Agent |
+| 2 | 退款链路：退款、券/积分回滚、开票红冲、风控 | `quality-graph` | 容易一次性遗漏跨域场景 | 可按需分析和检索 | 可通过覆盖缺口触发修订 | 优先升级质量闭环 |
+| 3 | 前后端分离输出：Confluence 表格要求前端/后端用例拆分 | `quality-graph` | 依赖模型自觉遵守格式 | 可调用校验/修复工具 | 内置确定性结构校验和修复路径 | 暂不需要更多 Agent，先强化校验 |
+| 4 | 大型多模块需求：会员、订单、售后、通知混合 | `react` 或 `quality-graph` | 上下文和覆盖压力较大 | 能按需调用分析/RAG | 能循环收敛但仍是单图内修订 | 可作为多 Agent 候选 |
+| 5 | 合规/安全测试：登录、权限、审计、风控证据 | `quality-graph` | 缺少可解释质量门 | 可按需检索安全资料 | 可记录质量分、缺口和决策路径 | 先用质量闭环，必要时再拆专家 Agent |
+
+**是否继续升级多 Agent：** 目前不建议立即引入独立多 Agent 编排。当前 benchmark 只有第 4 类大型多模块需求明确显示潜在收益；第 2、3、5 类主要缺口可以由 `quality-graph` 的质量门、修订循环、结构校验和 RAG 补强覆盖。下一步应先积累真实运行结果，包括每条需求的质量分、修订轮次、工具调用数、耗时和人工返工点；只有当大型多模块需求持续出现跨域遗漏或单图修订振荡时，再升级为多 Agent。
 
 ## 扩展开发
 
@@ -597,6 +688,9 @@ REQUEST_TIMEOUT=300
 - [x] 输出截断检测和警告
 - [x] 实时进度显示
 - [x] 自动保存到 outputs 目录
+- [x] ReAct 工具调用 Agent 模式
+- [x] quality-graph 质量闭环模式
+- [x] quality.py 和 React tools 的 mock 单元测试
 
 ### 规划中
 
@@ -612,7 +706,7 @@ REQUEST_TIMEOUT=300
   - 根据需求类型自动加载对应的测试模板
   - 支持混合场景（同时涉及C端和B端）
 
-- [ ] **多轮评审优化**（配置项已预留：`MAX_REVIEW_ROUNDS`）
+- [x] **多轮评审优化**（quality-graph 通过 `MAX_REVIEW_ROUNDS` 控制）
   - 评审 → 优化循环，直到评审通过或达到最大轮次
   - 需要设置明确的退出条件避免振荡
 
