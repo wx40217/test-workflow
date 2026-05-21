@@ -79,6 +79,7 @@ class MainQualityGraphTests(unittest.TestCase):
         with patch("main.create_workflow", side_effect=fake_create_workflow):
             result = main.generate_test_cases(
                 "用户登录功能：支持邮箱密码登录，3次失败锁定账户",
+                provider="deepseek",
                 api_key="test-key",
                 verbose=False,
                 agent_mode="quality-graph",
@@ -88,6 +89,7 @@ class MainQualityGraphTests(unittest.TestCase):
             )
 
         self.assertTrue(result.success)
+        self.assertEqual(captured["provider"], "deepseek")
         self.assertEqual(captured["agent_mode"], "quality-graph")
         self.assertEqual(captured["max_review_rounds"], 3)
         self.assertEqual(captured["quality_threshold"], 0.82)
@@ -109,6 +111,8 @@ class MainQualityGraphTests(unittest.TestCase):
             "main.py",
             "--input",
             "用户登录功能：支持邮箱密码登录，3次失败锁定账户",
+            "--provider",
+            "deepseek",
             "--agent-mode",
             "quality-graph",
             "--max-review-rounds",
@@ -132,6 +136,7 @@ class MainQualityGraphTests(unittest.TestCase):
 
         self.assertEqual(exit_ctx.exception.code, 0)
         self.assertEqual(stdout.getvalue(), "")
+        self.assertEqual(captured_kwargs["provider"], "deepseek")
         self.assertEqual(captured_kwargs["agent_mode"], "quality-graph")
         self.assertEqual(captured_kwargs["max_review_rounds"], 3)
         self.assertEqual(captured_kwargs["quality_threshold"], 0.82)

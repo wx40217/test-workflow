@@ -93,20 +93,13 @@ cp .env.example .env
 编辑 `.env` 文件，填入你的配置：
 
 ```env
-# 最简配置（三个节点使用相同的 API Key）
-GENERATOR_API_KEY=sk-your-api-key
-REVIEWER_API_KEY=sk-your-api-key
-OPTIMIZER_API_KEY=sk-your-api-key
+# 推荐最简配置（三个节点继承同一 provider）
+MODEL_PROVIDER=deepseek
+MODEL_API_KEY=sk-your-api-key
+MODEL_NAME=deepseek-v4-flash
 
-# 如果使用非 OpenAI 官方 API，设置 Base URL
-GENERATOR_BASE_URL=https://api.openai.com/v1
-REVIEWER_BASE_URL=https://api.openai.com/v1
-OPTIMIZER_BASE_URL=https://api.openai.com/v1
-
-# 模型配置
-GENERATOR_MODEL_NAME=gpt-4o
-REVIEWER_MODEL_NAME=o1-preview    # 评审使用思考模型效果更好
-OPTIMIZER_MODEL_NAME=gpt-4o
+# OpenAI-compatible 厂商需要额外配置
+# MODEL_BASE_URL=https://your-compatible-endpoint/v1
 ```
 
 ### 3. 验证安装
@@ -123,6 +116,11 @@ python main.py --help
 
 ```bash
 python main.py --input "用户登录功能：支持邮箱密码登录，3次失败锁定账户"
+
+# 临时指定 DeepSeek V4
+python main.py --input "用户登录功能：支持邮箱密码登录，3次失败锁定账户" \
+  --provider deepseek \
+  --generator-model deepseek-v4-flash
 ```
 
 执行时会显示实时进度：
@@ -379,33 +377,61 @@ result = generate_test_cases(
 - 包含问号（有不确定性）
 - 换行数超过 3 个
 
+#### 模型 Provider 配置
+
+推荐优先只配置全局 `MODEL_*`，各节点未覆盖时会继承同一套 provider 预设。
+
+```env
+MODEL_PROVIDER=deepseek
+MODEL_API_KEY=sk-...
+MODEL_NAME=deepseek-v4-flash
+```
+
+支持的 provider：
+
+| Provider | LangChain ChatModel | 默认行为 |
+|----------|---------------------|----------|
+| `openai` | `langchain_openai.ChatOpenAI` | 默认 base URL 为 `https://api.openai.com/v1`，启用 Responses API |
+| `deepseek` | `langchain_deepseek.ChatDeepSeek` | 默认 base URL 为 `https://api.deepseek.com`，默认模型 `deepseek-v4-flash`，不使用 OpenAI Responses API |
+| `openai-compatible` | `langchain_openai.ChatOpenAI` | 必须配置 `MODEL_BASE_URL`，不使用 Responses API |
+| `anthropic` | `langchain_anthropic.ChatAnthropic` | 使用 Claude/Anthropic 协议，不传 OpenAI 专属参数 |
+
+DeepSeek 说明：DeepSeek 官方已发布 V4，示例使用 `deepseek-v4-flash` / `deepseek-v4-pro`。旧 `deepseek-chat` / `deepseek-reasoner` 不再作为推荐值。V4 思考模式通过 `extra_body.thinking` 和 `reasoning_effort=high|max` 透传；ReAct 模式依赖 tool calling，如 provider 或模型能力不足会返回明确错误。
+
+RAG embedding 暂不跟随 chat provider，仍保留现有 OpenAI embedding 配置。
+
 #### 节点配置
 
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
-| `ANALYZER_API_KEY` | 分析器节点的 API 密钥（未配置时使用生成器配置） | - |
-| `ANALYZER_BASE_URL` | 分析器 API 基础 URL | https://api.openai.com/v1 |
-| `ANALYZER_MODEL_NAME` | 分析器使用的模型 | gpt-4o |
+| `MODEL_PROVIDER` | 全局模型 provider：`openai`、`deepseek`、`openai-compatible`、`anthropic` | openai |
+| `MODEL_API_KEY` | 全局模型 API 密钥 | - |
+| `MODEL_BASE_URL` | 全局 API 基础 URL；`openai-compatible` 必填 | provider 默认 |
+| `MODEL_NAME` | 全局模型名称 | provider 默认 |
+| `MODEL_SUPPORTS_TOOLS` | 显式声明模型是否支持 tool calling | provider 推断 |
+| `ANALYZER_API_KEY` | 分析器节点的 API 密钥（未配置时继承全局配置） | - |
+| `ANALYZER_BASE_URL` | 分析器 API 基础 URL | 继承全局配置 |
+| `ANALYZER_MODEL_NAME` | 分析器使用的模型 | 继承全局配置 |
 | `ANALYZER_TEMPERATURE` | 分析器采样温度 | 0.3 |
 | `ANALYZER_MAX_TOKENS` | 分析器最大 token 数 | 4096 |
-| `GENERATOR_API_KEY` | 生成器节点的 API 密钥 | - |
-| `GENERATOR_BASE_URL` | 生成器 API 基础 URL | https://api.openai.com/v1 |
-| `GENERATOR_MODEL_NAME` | 生成器使用的模型 | gpt-4o |
+| `GENERATOR_API_KEY` | 生成器节点的 API 密钥 | 继承全局配置 |
+| `GENERATOR_BASE_URL` | 生成器 API 基础 URL | 继承全局配置 |
+| `GENERATOR_MODEL_NAME` | 生成器使用的模型 | 继承全局配置 |
 | `GENERATOR_TEMPERATURE` | 生成器采样温度 | 0.7 |
 | `GENERATOR_MAX_TOKENS` | 生成器最大 token 数 | 8192 |
-| `REVIEWER_API_KEY` | 评审员节点的 API 密钥 | - |
-| `REVIEWER_BASE_URL` | 评审员 API 基础 URL | https://api.openai.com/v1 |
-| `REVIEWER_MODEL_NAME` | 评审员使用的模型 | o1-preview |
+| `REVIEWER_API_KEY` | 评审员节点的 API 密钥 | 继承全局配置 |
+| `REVIEWER_BASE_URL` | 评审员 API 基础 URL | 继承全局配置 |
+| `REVIEWER_MODEL_NAME` | 评审员使用的模型 | 继承全局配置 |
 | `REVIEWER_TEMPERATURE` | 评审员采样温度 | 1.0 |
 | `REVIEWER_MAX_TOKENS` | 评审员最大 token 数 | 8192 |
-| `OPTIMIZER_API_KEY` | 优化器节点的 API 密钥 | - |
-| `OPTIMIZER_BASE_URL` | 优化器 API 基础 URL | https://api.openai.com/v1 |
-| `OPTIMIZER_MODEL_NAME` | 优化器使用的模型 | gpt-4o |
+| `OPTIMIZER_API_KEY` | 优化器节点的 API 密钥 | 继承全局配置 |
+| `OPTIMIZER_BASE_URL` | 优化器 API 基础 URL | 继承全局配置 |
+| `OPTIMIZER_MODEL_NAME` | 优化器使用的模型 | 继承全局配置 |
 | `OPTIMIZER_TEMPERATURE` | 优化器采样温度 | 0.5 |
 | `OPTIMIZER_MAX_TOKENS` | 优化器最大 token 数 | 8192 |
 | `TEST_CASE_SPLIT_MODE` | 用例分离模式：`mixed` 或 `frontend_backend` | mixed |
 | `TEST_CASE_SPLIT_STRICT` | 分离模式下是否严格校验并自动修复结构 | true |
-| `USE_RESPONSES_API` | 是否使用 OpenAI Responses API（false 时使用 Chat Completions） | true |
+| `USE_RESPONSES_API` | 是否使用 OpenAI Responses API（仅 `openai` 默认启用） | provider 默认 |
 | `REQUEST_TIMEOUT` | 请求超时时间（秒） | 120 |
 | `RAG_ENABLED` | 是否启用 RAG | false |
 

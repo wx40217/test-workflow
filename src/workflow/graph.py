@@ -866,6 +866,7 @@ class TestCaseWorkflow:
 
 
 def create_workflow(
+    provider: Optional[str] = None,
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     generator_model: Optional[str] = None,
@@ -903,56 +904,67 @@ def create_workflow(
         配置好的TestCaseWorkflow实例
     """
     # 使用提供的值或回退到设置
-    gen_key = api_key or settings.generator_api_key
-    gen_url = base_url or settings.generator_base_url
-    gen_model = generator_model or settings.generator_model_name
+    provider = provider or settings.model_provider
+    global_api_key = api_key or settings.model_api_key or settings._global_api_key()
+    global_base_url = base_url or settings.model_base_url or ""
+    global_model = settings.model_name or ""
+
+    gen_key = api_key or settings._explicit_value("generator_api_key") or global_api_key
+    gen_url = base_url or settings._explicit_value("generator_base_url") or global_base_url
+    gen_model = generator_model or settings._explicit_value("generator_model_name") or global_model or settings.generator_model_name
     
-    rev_key = api_key or settings.reviewer_api_key
-    rev_url = base_url or settings.reviewer_base_url
-    rev_model = reviewer_model or settings.reviewer_model_name
+    rev_key = api_key or settings._explicit_value("reviewer_api_key") or global_api_key
+    rev_url = base_url or settings._explicit_value("reviewer_base_url") or global_base_url
+    rev_model = reviewer_model or settings._explicit_value("reviewer_model_name") or global_model or settings.reviewer_model_name
     
-    opt_key = api_key or settings.optimizer_api_key
-    opt_url = base_url or settings.optimizer_base_url
-    opt_model = optimizer_model or settings.optimizer_model_name
+    opt_key = api_key or settings._explicit_value("optimizer_api_key") or global_api_key
+    opt_url = base_url or settings._explicit_value("optimizer_base_url") or global_base_url
+    opt_model = optimizer_model or settings._explicit_value("optimizer_model_name") or global_model or settings.optimizer_model_name
     
     # 创建配置
     generator_config = ModelConfig(
         api_key=gen_key,
         base_url=gen_url,
         model_name=gen_model,
-        use_responses_api=settings.use_responses_api,
+        provider=provider,
+        use_responses_api=settings._use_responses_api(),
         test_case_split_mode=settings.test_case_split_mode,
         test_case_split_strict=settings.test_case_split_strict,
         temperature=settings.generator_temperature,
         max_tokens=settings.generator_max_tokens,
         timeout=settings.request_timeout,
         reasoning_effort=settings.generator_reasoning_effort,
+        supports_tools=settings.model_supports_tools,
     )
 
     reviewer_config = ModelConfig(
         api_key=rev_key,
         base_url=rev_url,
         model_name=rev_model,
-        use_responses_api=settings.use_responses_api,
+        provider=provider,
+        use_responses_api=settings._use_responses_api(),
         test_case_split_mode=settings.test_case_split_mode,
         test_case_split_strict=settings.test_case_split_strict,
         temperature=settings.reviewer_temperature,
         max_tokens=settings.reviewer_max_tokens,
         timeout=settings.request_timeout,
         reasoning_effort=settings.reviewer_reasoning_effort,
+        supports_tools=settings.model_supports_tools,
     )
 
     optimizer_config = ModelConfig(
         api_key=opt_key,
         base_url=opt_url,
         model_name=opt_model,
-        use_responses_api=settings.use_responses_api,
+        provider=provider,
+        use_responses_api=settings._use_responses_api(),
         test_case_split_mode=settings.test_case_split_mode,
         test_case_split_strict=settings.test_case_split_strict,
         temperature=settings.optimizer_temperature,
         max_tokens=settings.optimizer_max_tokens,
         timeout=settings.request_timeout,
         reasoning_effort=settings.optimizer_reasoning_effort,
+        supports_tools=settings.model_supports_tools,
     )
     
     # 如果启用则创建RAG接口

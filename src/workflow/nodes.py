@@ -11,13 +11,13 @@ from typing import Any, Optional
 from dataclasses import dataclass
 
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-from langchain_openai import ChatOpenAI
 
 import sys
 sys.path.insert(0, '/workspace')
 
 from config.settings import ModelConfig, settings
 from config.prompts import PromptTemplates
+from src.llm.providers import create_chat_model
 from src.rag.interface import RAGInterface
 
 
@@ -111,26 +111,13 @@ class BaseNode:
         self._llm = None
         self.stream_to_console = False
 
-    def _get_llm(self) -> ChatOpenAI:
+    def _get_llm(self) -> Any:
         """获取或创建LLM实例。"""
         if self._llm is None:
             if self.config is None:
                 raise ValueError("需要模型配置")
 
-            kwargs = {
-                "api_key": self.config.api_key,
-                "base_url": self.config.base_url,
-                "model": self.config.model_name,
-                "use_responses_api": self.config.use_responses_api,
-                "max_tokens": self.config.max_tokens,
-                "timeout": self.config.timeout,
-                "streaming": True,
-            }
-            if self.config.reasoning_effort:
-                kwargs["reasoning_effort"] = self.config.reasoning_effort
-            else:
-                kwargs["temperature"] = self.config.temperature
-            self._llm = ChatOpenAI(**kwargs)
+            self._llm = create_chat_model(self.config)
         return self._llm
 
     def _get_rag_context(self, query: str) -> str:

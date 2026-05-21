@@ -216,6 +216,7 @@ def load_prompts_config(config_file: str = None) -> None:
 
 def generate_test_cases(
     input_content: str,
+    provider: str = None,
     api_key: str = None,
     base_url: str = None,
     generator_model: str = None,
@@ -245,6 +246,7 @@ def generate_test_cases(
 
     参数:
         input_content: 输入内容（文本、文件路径或路径列表）
+        provider: 模型提供商（openai、deepseek、openai-compatible、anthropic）
         api_key: LLM的API密钥（未提供时使用环境变量）
         base_url: LLM API的基础URL（未提供时使用环境变量）
         generator_model: 用于测试用例生成的模型
@@ -282,14 +284,15 @@ def generate_test_cases(
     progress.start()
     show_agent_trace = settings.show_agent_trace if show_agent_trace is None else show_agent_trace
 
-    # 使用提供的API密钥或回退到设置
-    api_key = api_key or settings.generator_api_key or os.getenv("OPENAI_API_KEY")
-    base_url = base_url or settings.generator_base_url
+    # 使用提供的API密钥或回退到全局/旧设置
+    provider = provider or settings.model_provider
+    api_key = api_key or settings.generator_api_key or settings.model_api_key or os.getenv("OPENAI_API_KEY")
+    base_url = base_url or settings.generator_base_url or settings.model_base_url or settings._global_base_url()
 
     if not api_key:
         raise ValueError(
             "需要API密钥。通过api_key参数、"
-            "GENERATOR_API_KEY环境变量或OPENAI_API_KEY提供。"
+            "MODEL_API_KEY、GENERATOR_API_KEY环境变量或OPENAI_API_KEY提供。"
         )
 
     # 如果启用则创建RAG接口
@@ -318,6 +321,7 @@ def generate_test_cases(
 
     # 创建工作流
     workflow = create_workflow(
+        provider=provider,
         api_key=api_key,
         base_url=base_url,
         generator_model=generator_model,
@@ -502,7 +506,7 @@ def run_interactive():
     print()
     
     # 检查API密钥
-    api_key = settings.generator_api_key or os.getenv("OPENAI_API_KEY")
+    api_key = settings.generator_api_key or settings.model_api_key or os.getenv("OPENAI_API_KEY")
     if not api_key:
         api_key = input("请输入您的API密钥: ").strip()
         if not api_key:
@@ -510,7 +514,7 @@ def run_interactive():
             return
     
     # 获取基础URL
-    base_url = settings.generator_base_url
+    base_url = settings.generator_base_url or settings.model_base_url or settings._global_base_url()
     custom_url = input(f"基础URL [{base_url}]: ").strip()
     if custom_url:
         base_url = custom_url
@@ -548,6 +552,7 @@ def run_interactive():
     try:
         result = generate_test_cases(
             input_content,
+            provider=settings.model_provider,
             api_key=api_key,
             base_url=base_url,
             output_format=output_format,
@@ -623,9 +628,15 @@ def main():
     
     # API配置
     parser.add_argument(
+        "--provider",
+        choices=["openai", "deepseek", "openai-compatible", "anthropic"],
+        default=settings.model_provider,
+        help="模型提供商（默认读取 MODEL_PROVIDER）"
+    )
+    parser.add_argument(
         "--api-key",
         type=str,
-        help="API密钥（或设置OPENAI_API_KEY环境变量）"
+        help="API密钥（或设置 MODEL_API_KEY / OPENAI_API_KEY 环境变量）"
     )
     parser.add_argument(
         "--base-url",
@@ -791,6 +802,7 @@ def main():
     try:
         result = generate_test_cases(
             input_content,
+            provider=args.provider,
             api_key=args.api_key,
             base_url=args.base_url,
             generator_model=args.generator_model,

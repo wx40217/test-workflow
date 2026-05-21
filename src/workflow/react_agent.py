@@ -154,6 +154,12 @@ class TestCaseReactAgent:
 
     def _get_llm_with_tools(self, tools: list[Any]) -> Any:
         llm = self.llm or self.workflow.generator._get_llm()
+        config = getattr(getattr(self.workflow, "generator", None), "config", None)
+        if config is not None and getattr(config, "supports_tools", None) is False:
+            raise ReactAgentDependencyError(
+                "当前模型配置声明不支持 tool calling，无法运行 react 模式。"
+                "请更换支持工具调用的模型，或设置 MODEL_SUPPORTS_TOOLS=true。"
+            )
         if not hasattr(llm, "bind_tools"):
             raise ReactAgentDependencyError(
                 "当前模型客户端不支持 bind_tools，无法运行 react 模式。请使用支持 tool calling 的 LangChain ChatModel。"

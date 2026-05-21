@@ -9,9 +9,11 @@
 
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings
+
+from src.llm.providers import provider_defaults, resolve_provider_defaults
 
 # 自动查找并加载.env文件
 # 优先级：当前目录 > 项目根目录
@@ -40,6 +42,7 @@ class ModelConfig:
     单个LLM节点的模型配置。
     
     属性:
+        provider: 模型提供商预设名称
         api_key: 模型提供商的API密钥
         base_url: API端点的基础URL
         model_name: 使用的模型名称
@@ -54,16 +57,22 @@ class ModelConfig:
     def __init__(
         self,
         api_key: str,
-        base_url: str,
-        model_name: str,
-        use_responses_api: bool = True,
+        base_url: str = "",
+        model_name: str = "",
+        provider: str = "openai",
+        use_responses_api: Optional[bool] = None,
         test_case_split_mode: str = "mixed",
         test_case_split_strict: bool = True,
         temperature: float = 0.7,
         max_tokens: int = 4096,
         timeout: int = 120,
         reasoning_effort: Optional[str] = None,
+        extra_params: Optional[dict[str, Any]] = None,
+        supports_tools: Optional[bool] = None,
+        supports_vision: Optional[bool] = None,
+        thinking: Optional[bool] = None,
     ):
+        self.provider = provider
         self.api_key = api_key
         self.base_url = base_url
         self.model_name = model_name
@@ -74,6 +83,11 @@ class ModelConfig:
         self.max_tokens = max_tokens
         self.timeout = timeout
         self.reasoning_effort = reasoning_effort
+        self.extra_params = extra_params or {}
+        self.supports_tools = supports_tools
+        self.supports_vision = supports_vision
+        self.thinking = thinking
+        resolve_provider_defaults(self)
 
     def to_dict(self) -> dict:
         """将配置转换为字典。"""
@@ -81,6 +95,7 @@ class ModelConfig:
             "api_key": self.api_key,
             "base_url": self.base_url,
             "model_name": self.model_name,
+            "provider": self.provider,
             "use_responses_api": self.use_responses_api,
             "test_case_split_mode": self.test_case_split_mode,
             "test_case_split_strict": self.test_case_split_strict,
@@ -88,6 +103,10 @@ class ModelConfig:
             "max_tokens": self.max_tokens,
             "timeout": self.timeout,
             "reasoning_effort": self.reasoning_effort,
+            "extra_params": self.extra_params,
+            "supports_tools": self.supports_tools,
+            "supports_vision": self.supports_vision,
+            "thinking": self.thinking,
         }
 
 
@@ -101,10 +120,31 @@ class Settings(BaseSettings):
     3. 直接赋值
     
     环境变量命名规范：
+    - MODEL_PROVIDER, MODEL_API_KEY, MODEL_BASE_URL, MODEL_NAME
     - GENERATOR_API_KEY, GENERATOR_BASE_URL, GENERATOR_MODEL_NAME
     - REVIEWER_API_KEY, REVIEWER_BASE_URL, REVIEWER_MODEL_NAME
     - OPTIMIZER_API_KEY, OPTIMIZER_BASE_URL, OPTIMIZER_MODEL_NAME
     """
+
+    # ============================================
+    # 全局模型 provider 预设
+    # ============================================
+    model_provider: str = Field(
+        default="openai",
+        description="模型提供商：openai、deepseek、openai-compatible 或 anthropic"
+    )
+    model_api_key: str = Field(
+        default="",
+        description="全局模型 API 密钥"
+    )
+    model_base_url: str = Field(
+        default="",
+        description="全局模型 API 基础 URL"
+    )
+    model_name: str = Field(
+        default="",
+        description="全局模型名称"
+    )
     
     # ============================================
     # 节点一：生成器（测试用例生成）
@@ -114,7 +154,7 @@ class Settings(BaseSettings):
         description="生成器模型的API密钥"
     )
     generator_base_url: str = Field(
-        default="https://api.openai.com/v1",
+        default="",
         description="生成器模型API的基础URL"
     )
     generator_model_name: str = Field(
@@ -143,7 +183,7 @@ class Settings(BaseSettings):
         description="评审员模型的API密钥"
     )
     reviewer_base_url: str = Field(
-        default="https://api.openai.com/v1",
+        default="",
         description="评审员模型API的基础URL"
     )
     reviewer_model_name: str = Field(
@@ -172,7 +212,7 @@ class Settings(BaseSettings):
         description="优化器模型的API密钥"
     )
     optimizer_base_url: str = Field(
-        default="https://api.openai.com/v1",
+        default="",
         description="优化器模型API的基础URL"
     )
     optimizer_model_name: str = Field(
@@ -274,7 +314,7 @@ class Settings(BaseSettings):
         description="分析器模型的API密钥"
     )
     analyzer_base_url: str = Field(
-        default="https://api.openai.com/v1",
+        default="",
         description="分析器模型API的基础URL"
     )
     analyzer_model_name: str = Field(
@@ -307,7 +347,11 @@ class Settings(BaseSettings):
     )
     use_responses_api: bool = Field(
         default=True,
-        description="是否使用 OpenAI Responses API（false 时使用 Chat Completions API）"
+        description="是否使用 OpenAI Responses API（仅 openai provider 默认启用）"
+    )
+    model_supports_tools: Optional[bool] = Field(
+        default=None,
+        description="当前模型是否支持 tool calling；未设置时由 provider 预设推断"
     )
     request_timeout: int = Field(
         default=120,
@@ -324,65 +368,106 @@ class Settings(BaseSettings):
         "extra": "ignore",
         "env_ignore_empty": True,
     }
+
+    def _provider(self) -> str:
+        return self.model_provider
+
+    def _provider_default(self):
+        return provider_defaults(self._provider())
+
+    def _global_api_key(self) -> str:
+        return self.model_api_key or os.getenv("OPENAI_API_KEY", "")
+
+    def _global_base_url(self) -> str:
+        return self.model_base_url or self._provider_default().default_base_url or ""
+
+    def _global_model_name(self) -> str:
+        return self.model_name or self._provider_default().default_model or self.generator_model_name
+
+    def _explicit_value(self, field_name: str) -> Any:
+        return getattr(self, field_name) if field_name in self.model_fields_set else None
+
+    def _use_responses_api(self) -> bool:
+        if "use_responses_api" in self.model_fields_set:
+            return self.use_responses_api
+        return self._provider_default().default_use_responses_api
+
+    def _node_config(
+        self,
+        *,
+        api_key_field: str,
+        base_url_field: str,
+        model_name_field: str,
+        temperature: float,
+        max_tokens: int,
+        reasoning_effort_field: str,
+        default_model_name: str,
+    ) -> ModelConfig:
+        node_api_key = self._explicit_value(api_key_field) or ""
+        node_base_url = self._explicit_value(base_url_field) or ""
+        node_model_name = self._explicit_value(model_name_field) or ""
+        node_reasoning_effort = self._explicit_value(reasoning_effort_field)
+        return ModelConfig(
+            provider=self._provider(),
+            api_key=node_api_key or self._global_api_key(),
+            base_url=node_base_url or self._global_base_url(),
+            model_name=node_model_name or self._global_model_name() or default_model_name,
+            use_responses_api=self._use_responses_api(),
+            test_case_split_mode=self.test_case_split_mode,
+            test_case_split_strict=self.test_case_split_strict,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=self.request_timeout,
+            reasoning_effort=node_reasoning_effort,
+            supports_tools=self.model_supports_tools,
+        )
     
     def get_generator_config(self) -> ModelConfig:
         """获取生成器节点的配置。"""
-        return ModelConfig(
-            api_key=self.generator_api_key,
-            base_url=self.generator_base_url,
-            model_name=self.generator_model_name,
-            use_responses_api=self.use_responses_api,
-            test_case_split_mode=self.test_case_split_mode,
-            test_case_split_strict=self.test_case_split_strict,
+        return self._node_config(
+            api_key_field="generator_api_key",
+            base_url_field="generator_base_url",
+            model_name_field="generator_model_name",
             temperature=self.generator_temperature,
             max_tokens=self.generator_max_tokens,
-            timeout=self.request_timeout,
-            reasoning_effort=self.generator_reasoning_effort,
+            reasoning_effort_field="generator_reasoning_effort",
+            default_model_name=self.generator_model_name,
         )
     
     def get_reviewer_config(self) -> ModelConfig:
         """获取评审员节点的配置。"""
-        return ModelConfig(
-            api_key=self.reviewer_api_key,
-            base_url=self.reviewer_base_url,
-            model_name=self.reviewer_model_name,
-            use_responses_api=self.use_responses_api,
-            test_case_split_mode=self.test_case_split_mode,
-            test_case_split_strict=self.test_case_split_strict,
+        return self._node_config(
+            api_key_field="reviewer_api_key",
+            base_url_field="reviewer_base_url",
+            model_name_field="reviewer_model_name",
             temperature=self.reviewer_temperature,
             max_tokens=self.reviewer_max_tokens,
-            timeout=self.request_timeout,
-            reasoning_effort=self.reviewer_reasoning_effort,
+            reasoning_effort_field="reviewer_reasoning_effort",
+            default_model_name=self.reviewer_model_name,
         )
     
     def get_optimizer_config(self) -> ModelConfig:
         """获取优化器节点的配置。"""
-        return ModelConfig(
-            api_key=self.optimizer_api_key,
-            base_url=self.optimizer_base_url,
-            model_name=self.optimizer_model_name,
-            use_responses_api=self.use_responses_api,
-            test_case_split_mode=self.test_case_split_mode,
-            test_case_split_strict=self.test_case_split_strict,
+        return self._node_config(
+            api_key_field="optimizer_api_key",
+            base_url_field="optimizer_base_url",
+            model_name_field="optimizer_model_name",
             temperature=self.optimizer_temperature,
             max_tokens=self.optimizer_max_tokens,
-            timeout=self.request_timeout,
-            reasoning_effort=self.optimizer_reasoning_effort,
+            reasoning_effort_field="optimizer_reasoning_effort",
+            default_model_name=self.optimizer_model_name,
         )
 
     def get_analyzer_config(self) -> ModelConfig:
         """获取分析器节点的配置。未配置时使用生成器配置。"""
-        return ModelConfig(
-            api_key=self.analyzer_api_key or self.generator_api_key,
-            base_url=self.analyzer_base_url if self.analyzer_api_key else self.generator_base_url,
-            model_name=self.analyzer_model_name if self.analyzer_api_key else self.generator_model_name,
-            use_responses_api=self.use_responses_api,
-            test_case_split_mode=self.test_case_split_mode,
-            test_case_split_strict=self.test_case_split_strict,
+        return self._node_config(
+            api_key_field="analyzer_api_key",
+            base_url_field="analyzer_base_url",
+            model_name_field="analyzer_model_name",
             temperature=self.analyzer_temperature,
             max_tokens=self.analyzer_max_tokens,
-            timeout=self.request_timeout,
-            reasoning_effort=self.analyzer_reasoning_effort,
+            reasoning_effort_field="analyzer_reasoning_effort",
+            default_model_name=self.generator_model_name,
         )
 
     def use_same_key_for_all(self, api_key: str, base_url: Optional[str] = None):
@@ -416,7 +501,7 @@ def configure_from_env():
     # 如果优化器设置未显式设置，使用生成器设置
     if not settings.optimizer_api_key and settings.generator_api_key:
         settings.optimizer_api_key = settings.generator_api_key
-    if settings.optimizer_base_url == "https://api.openai.com/v1" and settings.generator_base_url != "https://api.openai.com/v1":
+    if not settings.optimizer_base_url and settings.generator_base_url:
         settings.optimizer_base_url = settings.generator_base_url
     if settings.optimizer_model_name == "gpt-4o" and settings.generator_model_name != "gpt-4o":
         settings.optimizer_model_name = settings.generator_model_name
